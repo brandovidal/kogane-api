@@ -28,6 +28,14 @@ describe('statement identity (P14)', () => {
     expect(matchCard(CARDS, { hint: null, lines: ['Servicio de mantenimiento'] })).toBeNull()
     expect(matchCard(CARDS, { hint: null, lines: ['Pago CMR y pago Sip'] })).toBeNull()
   })
+
+  it('should not guess a card from a purchase row, only from the header (a store chain like Falabella can be bought with any card)', () => {
+    expect(
+      matchCard(CARDS, { hint: null, lines: ['ESTADO DE CUENTA', '17/07 Compra Falabella.com Peru 197.80'] }),
+    ).toBeNull()
+    // The same word in the header (not a purchase row) still identifies the card
+    expect(matchCard(CARDS, { hint: null, lines: ['Estado de cuenta Falabella CMR'] })?.id).toBe('cmr')
+  })
 })
 
 describe('the person of each purchase (D116)', () => {

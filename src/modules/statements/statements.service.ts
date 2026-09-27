@@ -262,9 +262,15 @@ export class StatementsService {
     id: string,
     {
       personId,
+      paymentMethodId,
       minimumDue,
       minimumAllocations,
-    }: { personId?: string; minimumDue?: number | null; minimumAllocations?: Record<string, number> | null },
+    }: {
+      personId?: string
+      paymentMethodId?: string
+      minimumDue?: number | null
+      minimumAllocations?: Record<string, number> | null
+    },
   ) {
     if (personId) {
       const people = await this.personDBRepository.findActive()
@@ -272,6 +278,9 @@ export class StatementsService {
         throw new StatementUnreadableException({ reason: 'selected person not found' })
       }
       await this.statementDBRepository.assignPerson(id, personId)
+    }
+    if (paymentMethodId) {
+      await this.changeCard(id, paymentMethodId)
     }
     if (minimumDue !== undefined) {
       await this.statementDBRepository.updateMinimumDue(id, minimumDue)
@@ -331,7 +340,9 @@ export class StatementsService {
       operation: AiOperation.STATEMENT,
     })
     if (output?.movements.length) {
-      const aiParsed = fromAi(output, parsed.cardHint ?? detectCardHint(output.cardName ?? ''))
+      // The card the AI read off the statement wins over the template's naive full-text scan (which can be fooled by
+      // a purchase description, e.g. "Falabella.com" on a card that is not CMR)
+      const aiParsed = fromAi(output, detectCardHint(output.cardName ?? '') ?? parsed.cardHint)
       const fromAiRows = aiParsed.rows
       const seen = new Set(fromAiRows.map(rowKey))
       const itemizedCharges = parsed.rows.filter(
@@ -372,6 +383,44 @@ export class StatementsService {
     })
     if (!card) throw new StatementUnreadableException({ reason: 'card not found: choose it' })
     return card
+  }
+
+  // Corrects a wrongly identified card (the auto-detect can miss it): re-reconciles the rows that are not a card
+  // expense yet against the new card's expenses. A row already turned into a card expense (➕ Crear) keeps its own,
+  // since that expense is tied to whichever card it was created with
+  private async changeCard(id: string, paymentMethodId: string): Promise<void> {
+    const statement = await this.statementDBRepository.findById(id)
+    if (paymentMethodId === statement.paymentMethodId) return
+    const cards = await this.paymentMethodDBRepository.findAll()
+    const card = cards.find((method) => method.id === paymentMethodId && method.type === PaymentMethodType.CREDIT_CARD)
+    if (!card) throw new StatementUnreadableException({ reason: 'card not found: choose it' })
+
+    const period = { paymentMonth: statement.paymentMonth, paymentYear: statement.paymentYear }
+    const matchCandidates = [
+      ...(await this.cardExpenses(card.id, period)),
+      ...(await this.cardExpenses(card.id, addMonths(period, -1))),
+    ]
+    const editable = statement.rows.filter((row) => row.result !== StatementRowResult.CREATED)
+    const { rows: reconciled } = reconcileStatement(
+      editable.map((row) => ({
+        date: isoOf(row.date),
+        description: row.description,
+        amount: row.amount,
+        currency: row.currency,
+        installment: row.installment,
+        locked: row.locked,
+      })),
+      matchCandidates,
+    )
+    await this.statementDBRepository.changeCard(
+      id,
+      card.id,
+      editable.map((row, index) => ({
+        id: row.id,
+        result: reconciled[index].result,
+        expenseId: reconciled[index].expenseId,
+      })),
+    )
   }
 
   // The typed password, then the document number of the chosen person, of the owner and of everyone else who has one

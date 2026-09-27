@@ -49,6 +49,7 @@ const mockStatementDB = {
   updateRow: vi.fn(),
   assignPerson: vi.fn(),
   assignRows: vi.fn(),
+  changeCard: vi.fn(),
   delete: vi.fn(),
 }
 const mockPaymentMethods = { findAll: vi.fn(), findById: vi.fn() }
@@ -169,6 +170,40 @@ describe('StatementsService', () => {
     expect(mockStatementDB.create).toHaveBeenCalledWith(
       expect.objectContaining({ source: StatementSource.AI, rows: [expect.objectContaining({ description: 'CINE' })] }),
     )
+  })
+
+  it("should trust the card the AI read off the statement over the template's naive full-text scan", async () => {
+    // The template's cardHint would guess CMR from this unrelated line (a cross-brand ad every statement can carry);
+    // the AI reads the real card printed on the header
+    vi.mocked(readPdfLines).mockResolvedValue([
+      'Acumula puntos en tiendas Falabella y CMR',
+      'Fecha de cierre 09/09/2026',
+      // The template's total does not match its own rows (D95): the AI reads the rest, and the real card too
+      'Total a pagar S/ 200.00',
+      '09/09/2026 09/09/2026 Compra IO 110.00',
+    ])
+    mockExtraction.generateStructured.mockResolvedValue({
+      cardName: 'IO',
+      periodEnd: '2026-09-09',
+      dueDate: null,
+      totalDue: 200,
+      minimumDue: null,
+      currency: 'PEN',
+      movements: [
+        { date: '2026-09-09', description: 'Compra IO', amount: 110, currency: 'PEN', installment: null },
+        { date: '2026-09-09', description: 'Otra compra', amount: 90, currency: 'PEN', installment: null },
+      ],
+    })
+    mockPaymentMethods.findAll.mockResolvedValue([
+      OH,
+      { id: 'cmr', name: 'CMR', aliases: ['falabella'], type: 'credit_card', code: 'CMR', isActive: true },
+      { id: 'io', name: 'IO', aliases: ['interbank io'], type: 'credit_card', code: 'IO', isActive: true },
+    ])
+    mockStatementDB.findById.mockResolvedValue(saved([]))
+
+    await service.upload({ data: Buffer.from('pdf') })
+
+    expect(mockStatementDB.create).toHaveBeenCalledWith(expect.objectContaining({ paymentMethodId: 'io' }))
   })
 
   it('should keep itemized interest and insurance charges when AI reads the rest of a statement', async () => {
@@ -521,6 +556,70 @@ describe('StatementsService', () => {
       expect(mockStatementDB.assignPerson).toHaveBeenCalledWith('s1', 'dany')
 
       await expect(service.assignPerson('s1', 'ghost')).rejects.toBeInstanceOf(StatementUnreadableException)
+    })
+  })
+
+  describe('correcting a wrongly identified card (already loaded, no re-upload)', () => {
+    const IO = { id: 'io', name: 'IO', aliases: ['interbank io'], type: 'credit_card', code: 'IO', isActive: true }
+    const row = (overrides: Record<string, unknown>) => ({
+      id: 'r1',
+      date: new Date('2026-08-20T00:00:00Z'),
+      description: 'TAMBO VIRREY',
+      amount: 35.5,
+      currency: 'PEN',
+      installment: null,
+      locked: false,
+      result: StatementRowResult.NEW,
+      expenseId: null,
+      ...overrides,
+    })
+
+    it('should re-reconcile the rows not yet turned into an expense against the new card', async () => {
+      mockStatementDB.findById.mockResolvedValue({
+        ...saved([
+          row({}),
+          row({ id: 'r2', description: 'ALREADY BOOKED', result: StatementRowResult.CREATED, expenseId: 'kept' }),
+        ]),
+        paymentMethodId: 'oh',
+      })
+      mockPaymentMethods.findAll.mockResolvedValue([OH, IO])
+      mockStatementDB.findCardExpenses.mockResolvedValue([
+        { id: 'e-io', description: 'TAMBO VIRREY', amount: 35.5, processDate: null, installment: null },
+      ])
+
+      await service.update('s1', { paymentMethodId: 'io' })
+
+      expect(mockStatementDB.changeCard).toHaveBeenCalledWith('s1', 'io', [
+        { id: 'r1', result: StatementRowResult.MATCHED, expenseId: 'e-io' },
+      ])
+    })
+
+    it('should leave a row already turned into a card expense untouched', async () => {
+      mockStatementDB.findById.mockResolvedValue({
+        ...saved([row({ result: StatementRowResult.CREATED, expenseId: 'e-oh' })]),
+        paymentMethodId: 'oh',
+      })
+      mockPaymentMethods.findAll.mockResolvedValue([OH, IO])
+      mockStatementDB.findCardExpenses.mockResolvedValue([])
+
+      await service.update('s1', { paymentMethodId: 'io' })
+
+      expect(mockStatementDB.changeCard).toHaveBeenCalledWith('s1', 'io', [])
+    })
+
+    it('should do nothing when the card is the same, and reject a card that is not a credit card', async () => {
+      mockStatementDB.findById.mockResolvedValue({ ...saved([row({})]), paymentMethodId: 'oh' })
+
+      await service.update('s1', { paymentMethodId: 'oh' })
+      expect(mockStatementDB.changeCard).not.toHaveBeenCalled()
+
+      mockPaymentMethods.findAll.mockResolvedValue([
+        OH,
+        { id: 'yape', name: 'Yape', aliases: [], type: 'wallet', code: null, isActive: true },
+      ])
+      await expect(service.update('s1', { paymentMethodId: 'yape' })).rejects.toBeInstanceOf(
+        StatementUnreadableException,
+      )
     })
   })
 })

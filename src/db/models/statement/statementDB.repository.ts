@@ -149,6 +149,23 @@ export class StatementDBRepository {
     return this.findById(id)
   }
 
+  // Corrects a wrongly identified card: the rows not tied to an expense yet (new, matched, ignored) are re-reconciled
+  // against the new card's expenses; a row already turned into a card expense (created) keeps its own
+  async changeCard(
+    id: string,
+    paymentMethodId: string,
+    rows: { id: string; result: string; expenseId: string | null }[],
+  ) {
+    await this.prisma.$transaction(async (tx) => {
+      await tx.statement.update({ where: { id }, data: { paymentMethodId } })
+      for (const row of rows) {
+        await tx.statementRow.update({ where: { id: row.id }, data: { result: row.result, expenseId: row.expenseId } })
+      }
+      await this.refreshStatus(tx, id)
+    })
+    return this.findById(id)
+  }
+
   async updateMinimumDue(id: string, minimumDue: number | null) {
     await this.prisma.statement.update({ where: { id }, data: { minimumDue } })
     return this.findById(id)

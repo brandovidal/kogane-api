@@ -76,6 +76,13 @@ describe('statement.parser', () => {
     expect(detectCardHint('Banco')).toBeNull()
   })
 
+  it('should not guess CMR from a "Falabella" purchase alone: it is a store chain, not only a CMR thing', () => {
+    // A Falabella.com purchase can be on any card's statement, not only CMR's (real bug: every statement with one
+    // of these got tagged CMR)
+    expect(detectCardHint('15/08 Compra Falabella.com Peru 197.80')).toBeNull()
+    expect(detectCardHint('Compra Sodimac Falabella 120.00')).toBeNull()
+  })
+
   it('should mask the document number and long numbers before the AI reads the text (D94)', () => {
     expect(maskForAi(['Titular DNI 44556677', 'Tarjeta 4557 8800 1234 5678'], '44556677')).toBe(
       'Titular DNI ********\nTarjeta [número]',

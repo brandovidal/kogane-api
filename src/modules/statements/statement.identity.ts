@@ -19,6 +19,11 @@ const termsOf = (entry: Named) =>
 const hasWord = (text: string, term: string) =>
   new RegExp(`(^|[^a-z0-9])${term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}($|[^a-z0-9])`).test(text)
 
+// A purchase or payment row of a statement, not its header: it always ends in a decimal amount ("164.90", "1,459.80").
+// Aliases can be a generic word (a store chain, e.g. CMR's alias "falabella") that only shows up in one of these rows
+// ("Compra Falabella.com Peru", bought with a different card) and would misidentify the card; the header never needs one
+const looksLikeARow = (line: string) => /\d[.,]\d{2}\s*(cr|-)?\s*$/i.test(line)
+
 // Whose statement it is: a person named on a holder line of the PDF or in the holder the AI read (D94, P14)
 export function inferHolder<T extends Named>(people: T[], lines: string[], holderName?: string | null): T | null {
   const holderLines = [
@@ -45,7 +50,9 @@ export function matchCard<T extends Card>(
   const byCode = hint ? cards.find((card) => card.code === hint) : undefined
   if (byCode) return byCode
 
-  const texts = [...(cardName ? [cardName] : []), ...lines.slice(0, 40)].map(normalizeText)
+  const texts = [...(cardName ? [cardName] : []), ...lines.filter((line) => !looksLikeARow(line)).slice(0, 40)].map(
+    normalizeText,
+  )
   const named = cards.filter((card) =>
     termsOf(card).some((term) => term.length > 2 && texts.some((text) => hasWord(text, term))),
   )

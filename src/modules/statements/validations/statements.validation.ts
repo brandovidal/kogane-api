@@ -14,11 +14,17 @@ export const uploadStatementSchema = z.object({
 export const updateStatementSchema = z
   .object({
     personId: z.string().min(1).optional(),
+    // Corrects a wrongly identified card (D-105+): re-reconciles the rows that are not a card expense yet
+    paymentMethodId: z.string().min(1).optional(),
     minimumDue: z.number().nonnegative().nullable().optional(),
     minimumAllocations: z.record(z.string(), z.number().nonnegative()).nullable().optional(),
   })
   .refine(
-    (value) => value.personId !== undefined || value.minimumDue !== undefined || value.minimumAllocations !== undefined,
+    (value) =>
+      value.personId !== undefined ||
+      value.paymentMethodId !== undefined ||
+      value.minimumDue !== undefined ||
+      value.minimumAllocations !== undefined,
   )
 
 // Selección múltiple (D116): the person of several purchases at once; null goes back to the statement's

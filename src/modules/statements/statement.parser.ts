@@ -121,7 +121,8 @@ export function detectCardHint(text: string): string | null {
   const normalized = normalizeText(text)
   if (/american express|\bamex\b/.test(normalized)) return 'AMEX'
   if (/\bsip\b|tarjeta oh|\boh!/.test(normalized)) return 'OH'
-  if (/\bcmr\b|falabella/.test(normalized)) return 'CMR'
+  // Not bare "falabella": CMR is a Falabella card, but a Falabella.com purchase can be on any other card's statement too
+  if (/\bcmr\b/.test(normalized)) return 'CMR'
   if (/\btarjeta io\b|\bio\b/.test(normalized)) return 'IO'
   return null
 }
