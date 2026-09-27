@@ -58,16 +58,24 @@ export class AttachmentsService {
       file.buffer,
       contentType,
     )
-    const created = await this.attachmentDBRepository.create(
-      {
+    let created: AttachmentWithFile
+    try {
+      const data = {
         fileId: stored.id,
         refType: body.refType,
         refId: body.refId,
         kind: body.kind ?? AttachmentKind.OTHER,
         name: body.name ?? file.originalname?.trim().slice(0, 120) ?? 'archivo',
-      },
-      body.kind === AttachmentKind.BOLETA && resource === ExpenseResource.FIXED_COST,
-    )
+      }
+      created =
+        body.kind === AttachmentKind.BOLETA && resource === ExpenseResource.FIXED_COST
+          ? await this.attachmentDBRepository.create(data, true)
+          : await this.attachmentDBRepository.create(data)
+    } catch (error) {
+      // A failed database transaction must not leave a kept file with no attachment.
+      await this.release([stored.id])
+      throw error
+    }
     return this.toView(created)
   }
 
