@@ -78,9 +78,7 @@ async function main() {
   })
 
   await printWebhookInfo(token)
-  console.log(
-    `Menu: ${BOT_MENU_COMMANDS.map((command) => `/${command}`).join(' ')}`,
-  )
+  console.log(`Menu: ${BOT_MENU_COMMANDS.map((command) => `/${command}`).join(' ')}`)
 }
 
 main().catch((error: Error) => {
