@@ -69,7 +69,7 @@ export class DebtDBRepository {
       },
       select: {
         amount: true,
-        debt: { select: { personId: true, person: { select: { name: true } } } },
+        debt: { select: { currency: true, personId: true, person: { select: { name: true } } } },
       },
     })
   }

@@ -478,6 +478,49 @@ describe('StatementsService', () => {
     })
   })
 
+  describe('payment summary (D95, "Resumen de movimientos y pagos del mes")', () => {
+    const row = (overrides: Record<string, unknown>) => ({
+      id: 'r1',
+      result: StatementRowResult.NEW,
+      description: 'TAMBO',
+      amount: 35.5,
+      currency: 'PEN',
+      installment: null,
+      date: null,
+      expenseId: null,
+      personId: null,
+      ...overrides,
+    })
+
+    it('should split each currency into direct consumption, installments and itemized charges', async () => {
+      mockStatementDB.findById.mockResolvedValue(
+        saved([
+          row({ id: 'a', description: 'CINEPLANET', amount: 20 }), // direct, no installment
+          row({ id: 'b', description: 'FREEPASS 2/3', amount: 40, installment: '2/3' }), // installment
+          row({ id: 'c', description: 'Interes Compensatorio', amount: 5 }), // itemized, wins over "direct"
+          row({ id: 'd', description: 'RAILWAY', amount: 25, currency: 'USD' }), // a second currency
+        ]),
+      )
+
+      const view = await service.get('s1')
+
+      expect(view.balances).toEqual([
+        expect.objectContaining({
+          currency: 'PEN',
+          directConsumption: 20,
+          installmentConsumption: 40,
+          itemizedCharges: 5,
+        }),
+        expect.objectContaining({
+          currency: 'USD',
+          directConsumption: 25,
+          installmentConsumption: 0,
+          itemizedCharges: 0,
+        }),
+      ])
+    })
+  })
+
   it('should rename a row (empty goes back to the bank text) or ignore it', async () => {
     mockStatementDB.findById.mockResolvedValue(saved([]))
     await service.updateRow('s1', 'r1', { label: '' })

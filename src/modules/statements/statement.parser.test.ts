@@ -33,6 +33,18 @@ describe('statement.parser', () => {
     expect(templateAddsUp(parsed)).toBe(true)
   })
 
+  it('should read "N de M" installments too (IO prints it that way, not "N/M")', () => {
+    const parsed = parseStatementLines([
+      'Fecha de cierre 25/09/2026',
+      'Total a pagar 122.68',
+      '10/09/2026 FREEPASS 2 de 3 122.68',
+    ])
+
+    expect(parsed.rows).toEqual([
+      { date: '2026-09-10', description: 'FREEPASS', amount: 122.68, currency: 'PEN', installment: '2/3' },
+    ])
+  })
+
   it('should read month names and thousands separators', () => {
     const parsed = parseStatementLines([
       'American Express Green',

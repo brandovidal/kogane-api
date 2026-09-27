@@ -1,6 +1,7 @@
+import { StatementBalanceData } from '@/modules/statements/statement.balance'
 import { Injectable } from '@nestjs/common'
+import { Statement, StatementBalance } from '@/generated/prisma/client'
 
-import { Statement } from '@/generated/prisma/client'
 import { PrismaService } from '@/db/prisma/prisma.service'
 import { runAsImport } from '@/db/audit/audit-context'
 import { AuditAction } from '@/commons/constants/audit.constant'
@@ -10,6 +11,7 @@ import { StatementNotFoundException } from '@/commons/exceptions/statement/state
 import { PaymentPeriod } from '@/commons/helpers/payment-period.helper'
 
 export interface CreateStatementDbDto {
+  balances: StatementBalanceData[]
   paymentMethodId: string
   personId: string
   paymentMonth: number
@@ -37,15 +39,25 @@ export interface CreateStatementDbDto {
   }[]
 }
 
-const withRows = { rows: { orderBy: [{ date: 'asc' as const }, { createdAt: 'asc' as const }] } }
+const withRows = {
+  balances: { orderBy: { currency: 'asc' as const } },
+  rows: { orderBy: [{ date: 'asc' as const }, { createdAt: 'asc' as const }] },
+}
 
 // Bank statements (P14 block 2, D95) and the card expenses they are reconciled with
 @Injectable()
 export class StatementDBRepository {
   constructor(private readonly prisma: PrismaService) {}
 
-  create({ rows, ...data }: CreateStatementDbDto) {
-    return this.prisma.statement.create({ data: { ...data, rows: { create: rows } }, include: withRows })
+  create({ rows, balances, ...data }: CreateStatementDbDto) {
+    return this.prisma.$transaction(async (tx) => {
+      const statement = await tx.statement.create({ data })
+      await tx.statementBalance.createMany({
+        data: balances.map((balance) => ({ ...balance, statementId: statement.id })),
+      })
+      await tx.statementRow.createMany({ data: rows.map((row) => ({ ...row, statementId: statement.id })) })
+      return tx.statement.findUniqueOrThrow({ where: { id: statement.id }, include: withRows })
+    })
   }
 
   async findById(id: string) {
@@ -57,7 +69,7 @@ export class StatementDBRepository {
   findMany() {
     return this.prisma.statement.findMany({
       orderBy: [{ paymentYear: 'desc' }, { paymentMonth: 'desc' }, { createdAt: 'desc' }],
-      include: { rows: { select: { result: true } } },
+      include: { balances: true, rows: { select: { result: true } } },
     })
   }
 
@@ -71,10 +83,11 @@ export class StatementDBRepository {
   }
 
   // The statements of those months (the calendar shows their real total and due date, P20)
-  findForPeriods(periods: PaymentPeriod[]): Promise<Statement[]> {
+  findForPeriods(periods: PaymentPeriod[]): Promise<(Statement & { balances: StatementBalance[] })[]> {
     if (!periods.length) return Promise.resolve([])
     return this.prisma.statement.findMany({
       where: { OR: periods.map(({ paymentMonth, paymentYear }) => ({ paymentMonth, paymentYear })) },
+      include: { balances: true },
       orderBy: { createdAt: 'desc' },
     })
   }
@@ -92,6 +105,7 @@ export class StatementDBRepository {
         id: true,
         description: true,
         amount: true,
+        currency: true,
         processDate: true,
         installment: true,
         personId: true,
@@ -166,15 +180,34 @@ export class StatementDBRepository {
     return this.findById(id)
   }
 
-  async updateMinimumDue(id: string, minimumDue: number | null) {
-    await this.prisma.statement.update({ where: { id }, data: { minimumDue } })
-    return this.findById(id)
+  async updateMinimumDue(id: string, minimumDue: number | null, currency?: string) {
+    return this.updateBalance(id, { minimumDue }, currency)
   }
 
-  async updateMinimumAllocations(id: string, minimumAllocations: Record<string, number> | null) {
-    await this.prisma.statement.update({
-      where: { id },
-      data: { minimumAllocations: minimumAllocations === null ? null : JSON.stringify(minimumAllocations) },
+  async updateMinimumAllocations(id: string, allocations: Record<string, number> | null, currency?: string) {
+    return this.updateBalance(
+      id,
+      { minimumAllocations: allocations === null ? null : JSON.stringify(allocations) },
+      currency,
+    )
+  }
+
+  private async updateBalance(
+    id: string,
+    data: { minimumDue?: number | null; minimumAllocations?: string | null },
+    currency?: string,
+  ) {
+    await this.prisma.$transaction(async (tx) => {
+      const statement = await tx.statement.findUniqueOrThrow({ where: { id } })
+      const selectedCurrency = currency ?? statement.currency
+      await tx.statementBalance.upsert({
+        where: { statementId_currency: { statementId: id, currency: selectedCurrency } },
+        create: { statementId: id, currency: selectedCurrency, ...data },
+        update: data,
+      })
+      if (selectedCurrency === statement.currency) {
+        await tx.statement.update({ where: { id }, data })
+      }
     })
     return this.findById(id)
   }

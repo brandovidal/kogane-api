@@ -9,6 +9,7 @@ export interface CardExpenseForMatch {
   id: string
   description: string
   amount: number
+  currency?: string // imports predating currency tracking represent PEN
   processDate: string | null // YYYY-MM-DD
   installment: string | null
   personId?: string // whose expense it is (the Persona of the card boards)
@@ -29,6 +30,7 @@ const daysApart = (a: string, b: string) =>
 
 // Same amount, and the same installment or a date within 3 days; the merchant name breaks ties (D95)
 function score(row: ParsedStatementRow, expense: CardExpenseForMatch): number | null {
+  if (row.currency !== (expense.currency ?? 'PEN')) return null
   if (toCents(row.amount) !== toCents(expense.amount)) return null
   const sameInstallment = row.installment != null && row.installment === expense.installment
   const closeDate =

@@ -1,3 +1,4 @@
+import { statementBalances, emptyStatementBalance } from './statement.balance'
 import { Injectable, Logger } from '@nestjs/common'
 
 import { AiOperation } from '@/commons/constants/ai.constant'
@@ -49,8 +50,33 @@ const periodOfDay = (isoDay: string): PaymentPeriod => ({
 
 const ITEMIZED_CARD_CHARGE =
   /\b(seguro( de)? desgravamen|desgravamen|interes(es)?|comision(es)?|membresia|itf|mora|moratorio|penalidad)\b/i
-const rowKey = (row: { date: string | null; description: string; amount: number }) =>
-  `${row.date ?? ''}|${toCents(row.amount)}|${row.description
+
+// "Resumen de movimientos y pagos del mes" the bank prints (saldo anterior, abonos, consumos con y sin cuotas,
+// intereses…): previousBalance/previousPayments/totalDue/minimumDue already come from the balance the PDF stated;
+// these three are computed from the rows already saved, so they never drift from what the statement detail shows
+function paymentSummaryOf(
+  rows: { description: string; amount: number; currency: string; installment: string | null }[],
+  currency: string,
+) {
+  const ofCurrency = rows.filter((row) => row.currency === currency)
+  const itemized = ofCurrency.filter((row) => ITEMIZED_CARD_CHARGE.test(row.description))
+  const consumption = ofCurrency.filter((row) => !ITEMIZED_CARD_CHARGE.test(row.description))
+  const sum = (list: { amount: number }[]) => toCents(list.reduce((total, row) => total + row.amount, 0))
+  return {
+    directConsumption: sum(consumption.filter((row) => row.installment == null)),
+    installmentConsumption: sum(consumption.filter((row) => row.installment != null)),
+    itemizedCharges: sum(itemized),
+  }
+}
+
+const rowKey = (row: {
+  date: string | null
+  description: string
+  amount: number
+  currency: string
+  installment?: string | null
+}) =>
+  `${row.currency}|${row.installment ?? ''}|${row.date ?? ''}|${toCents(row.amount)}|${row.description
     .normalize('NFD')
     .replace(/\p{Diacritic}/gu, '')
     .toLowerCase()
@@ -116,6 +142,7 @@ export class StatementsService {
 
     const fileId = await this.keepFile(data)
     const statement = await this.statementDBRepository.create({
+      balances: statementBalances(parsed),
       paymentMethodId: card.id,
       personId: assignedPersonId,
       ...period,
@@ -158,9 +185,31 @@ export class StatementsService {
     ])
     const linked = new Set(statement.rows.map((row) => row.expenseId).filter(Boolean))
     const personOfExpense = new Map(expenses.map((expense) => [expense.id, expense.personId ?? null]))
-    const koganeTotal = toCents(expenses.reduce((sum, expense) => sum + expense.amount, 0))
+    const savedBalances = statementBalances(statement)
+    const currencies = new Set([
+      ...savedBalances.map((balance) => balance.currency),
+      ...expenses.map((expense) => expense.currency ?? Currency.PEN),
+      ...statement.rows.map((row) => row.currency),
+    ])
+    const balances = [...currencies].sort().map((currency) => {
+      const balance = savedBalances.find((item) => item.currency === currency) ?? emptyStatementBalance(currency)
+      const koganeTotal = toCents(
+        expenses
+          .filter((expense) => (expense.currency ?? Currency.PEN) === currency)
+          .reduce((sum, expense) => sum + expense.amount, 0),
+      )
+      return {
+        ...balance,
+        koganeTotal,
+        difference: balance.totalDue == null ? null : toCents(balance.totalDue - koganeTotal),
+        ...paymentSummaryOf(statement.rows, currency),
+      }
+    })
+    const primary = balances.find((balance) => balance.currency === (statement.currency ?? Currency.PEN)) ?? balances[0]
+    const koganeTotal = primary.koganeTotal
     return {
       ...statement,
+      balances,
       // Whose each purchase is: its expense's person once matched or created, else the one chosen, else the statement's
       rows: statement.rows.map((row) => ({
         ...row,
@@ -169,7 +218,7 @@ export class StatementsService {
       cardName: card?.name ?? '',
       missing: expenses.filter((expense) => !linked.has(expense.id)),
       koganeTotal,
-      difference: statement.totalDue == null ? null : toCents(statement.totalDue - koganeTotal),
+      difference: primary.difference,
     }
   }
 
@@ -265,9 +314,11 @@ export class StatementsService {
       paymentMethodId,
       minimumDue,
       minimumAllocations,
+      currency,
     }: {
       personId?: string
       paymentMethodId?: string
+      currency?: string
       minimumDue?: number | null
       minimumAllocations?: Record<string, number> | null
     },
@@ -283,10 +334,10 @@ export class StatementsService {
       await this.changeCard(id, paymentMethodId)
     }
     if (minimumDue !== undefined) {
-      await this.statementDBRepository.updateMinimumDue(id, minimumDue)
+      await this.statementDBRepository.updateMinimumDue(id, minimumDue, currency)
     }
     if (minimumAllocations !== undefined) {
-      await this.statementDBRepository.updateMinimumAllocations(id, minimumAllocations)
+      await this.statementDBRepository.updateMinimumAllocations(id, minimumAllocations, currency)
     }
     return this.get(id)
   }
@@ -348,27 +399,41 @@ export class StatementsService {
       const itemizedCharges = parsed.rows.filter(
         (row) => ITEMIZED_CARD_CHARGE.test(row.description) && !seen.has(rowKey(row)),
       )
-      const parsedBalanceRows = parsed.rows.filter((row) => row.description.startsWith('Saldo mes anterior neto'))
-      const parsedAnulations = parsed.rows.filter((row) => row.locked)
-      const mergedRows = [...fromAiRows, ...itemizedCharges, ...parsedBalanceRows, ...parsedAnulations]
-      const uniqueRows = [...new Map(mergedRows.map((row) => [rowKey(row), row])).values()]
-      const previousBalance = parsed.previousBalance ?? aiParsed.previousBalance
-      const previousPayments = parsed.previousPayments ?? aiParsed.previousPayments
-      const monthlyPayment = parsed.monthlyPayment ?? aiParsed.monthlyPayment
-      return {
-        parsed: {
-          ...aiParsed,
-          previousBalance,
-          previousPayments,
-          monthlyPayment,
-          totalDue: parsed.totalDue ?? monthlyPayment ?? aiParsed.totalDue,
-          rows: lockCancelledStatementRows(uniqueRows),
-        },
-        source: StatementSource.AI,
+      // The AI owns the currency interpretation when the template could not reconcile the PDF.
+      // Never overwrite a USD total with the last amount of a dual-column template line.
+      const multiCurrency =
+        new Set([
+          ...aiParsed.rows.map((row) => row.currency),
+          ...(parsed.balances ?? []).map((balance) => balance.currency),
+        ]).size > 1
+      const balanceCurrencies = new Set(aiParsed.balances?.map((balance) => balance.currency))
+      const requiredCurrencies = new Set([
+        ...aiParsed.rows.map((row) => row.currency),
+        ...((parsed.balances?.length ?? 0) > 1 ? parsed.balances!.map((balance) => balance.currency) : []),
+      ])
+      if (
+        (multiCurrency && !output.balances?.length) ||
+        [...requiredCurrencies].some((currency) => !balanceCurrencies.has(currency)) ||
+        balanceCurrencies.size !== aiParsed.balances?.length
+      ) {
+        throw new StatementUnreadableException({ reason: 'currency balances not identified' })
       }
+      const supplements = parsed.currencyAmbiguous || multiCurrency ? [] : itemizedCharges
+      const parsedAnulations = parsed.currencyAmbiguous || multiCurrency ? [] : parsed.rows.filter((row) => row.locked)
+      // Preserve repeated purchases in the PDF, including equal amounts in different currencies.
+      const extras = [...supplements, ...parsedAnulations].filter((row) => {
+        const key = rowKey(row)
+        if (seen.has(key)) return false
+        seen.add(key)
+        return true
+      })
+      const uniqueRows = [...fromAiRows, ...extras]
+      return { parsed: { ...aiParsed, rows: lockCancelledStatementRows(uniqueRows) }, source: StatementSource.AI }
     }
-    if (parsed.rows.length) return { parsed, source: StatementSource.TEMPLATE }
-    throw new StatementUnreadableException({ reason: 'no movements' })
+    if (parsed.rows.length && !parsed.currencyAmbiguous) return { parsed, source: StatementSource.TEMPLATE }
+    throw new StatementUnreadableException({
+      reason: parsed.currencyAmbiguous ? 'currency balances not identified' : 'no movements',
+    })
   }
 
   private async cardOf(paymentMethodId: string | null, parsed: ParsedStatement, lines: string[]) {
@@ -488,25 +553,37 @@ export class StatementsService {
     const count = (result: StatementRowResult) => view.rows.filter((row) => row.result === result).length
     // What each other person of the card has on it (P30, D116): their purchases, to collect once saved
     const names = new Map((await this.personDBRepository.findActive()).map((person) => [person.id, person.name]))
-    const byPerson = new Map<string, number>()
+    const byPerson = new Map<string, { personId: string; currency: string; amount: number }>()
     view.rows
       .filter((row) => row.result !== StatementRowResult.IGNORED && row.personId && row.personId !== view.personId)
-      .forEach((row) => byPerson.set(row.personId!, toCents((byPerson.get(row.personId!) ?? 0) + row.amount)))
+      .forEach((row) => {
+        const key = `${row.personId}:${row.currency}`
+        const previous = byPerson.get(key)
+        byPerson.set(key, {
+          personId: row.personId!,
+          currency: row.currency,
+          amount: toCents((previous?.amount ?? 0) + row.amount),
+        })
+      })
+    const money = (amount: number, currency: string) =>
+      `${currency === Currency.USD ? 'US$' : 'S/'} ${amount.toFixed(2)}`
     const collect = byPerson.size
-      ? ` A cobrar: ${[...byPerson].map(([id, amount]) => `${names.get(id) ?? '—'} S/ ${amount.toFixed(2)}`).join(', ')}.`
+      ? ` A cobrar: ${[...byPerson.values()].map((item) => `${names.get(item.personId) ?? '—'} ${money(item.amount, item.currency)}`).join(', ')}.`
       : ''
     const month = `${MONTH_NAMES[view.paymentMonth - 1]} ${view.paymentYear}`
-    const total =
-      view.difference == null
-        ? ''
-        : Math.abs(view.difference) < 0.01
-          ? ' El total cuadra ✅'
-          : ` Diferencia con lo registrado: S/ ${view.difference.toFixed(2)}.`
+    const total = view.balances
+      .filter((balance) => balance.difference != null)
+      .map((balance) =>
+        Math.abs(balance.difference!) < 0.01
+          ? ` El total en ${balance.currency} cuadra ✅`
+          : ` Diferencia con lo registrado: ${money(balance.difference!, balance.currency)}.`,
+      )
+      .join('')
     return this.notificationsService.notify({
       kind: NotificationKind.STATEMENT,
       title: `📄 Estado de cuenta ${view.cardName} · ${month}`,
       body: `${count(StatementRowResult.MATCHED)} ya registrados, ${count(StatementRowResult.NEW)} nuevos y ${view.missing.length} solo en Kogane.${total}${collect} Revísalo en Estados de cuenta.`,
-      amount: view.totalDue,
+      amount: view.balances.length === 1 && view.currency === Currency.PEN ? view.totalDue : null,
       refType: NotificationRefType.STATEMENT,
       refId: view.id,
       eventDate: view.dueDate,
