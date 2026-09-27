@@ -1,4 +1,4 @@
-import { ChannelMessageType } from '@/commons/constants/conversation.constant'
+import { ChannelMessageType, KEYBOARD_COMMANDS } from '@/commons/constants/conversation.constant'
 import { ExpenseDraftChannel } from '@/commons/constants/expense-draft.constant'
 import { decodeBotAction } from '@/modules/conversation/bot-action.codec'
 import { BotButton, ChannelMedia, ChannelMessage } from '@/modules/conversation/dto/conversation.types'
@@ -112,6 +112,19 @@ export function toReplyMarkup(buttons?: BotButton[][]): TelegramReplyMarkup | un
   if (!buttons?.length) return undefined
 
   return {
-    inline_keyboard: buttons.map((row) => row.map(({ label, data }) => ({ text: label, callback_data: data }))),
+    inline_keyboard: buttons.map((row) =>
+      row.map(({ label, data, url }) => (url ? { text: label, url } : { text: label, callback_data: data })),
+    ),
   }
 }
+
+// The fixed keyboard of /teclado: the texts of its buttons arrive as a message (KEYBOARD_TEXTS)
+
+export const toKeyboardMarkup = (keyboard: 'show' | 'hide'): TelegramReplyMarkup =>
+  keyboard === 'show'
+    ? {
+        keyboard: [Object.keys(KEYBOARD_COMMANDS).map((text) => ({ text }))],
+        resize_keyboard: true,
+        is_persistent: true,
+      }
+    : { remove_keyboard: true }

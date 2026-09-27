@@ -2,7 +2,7 @@
 // Usage: make telegram URL=https://public-url   (defaults to PUBLIC_URL from the env file)
 //        --info: only shows the webhook, changes nothing (make telegram in dev without a running tunnel)
 //        --optional-webhook: without a public URL only the command menu is updated (used by make deps)
-import { BOT_COMMAND_DESCRIPTIONS } from '../src/commons/constants/conversation.constant'
+import { BOT_COMMAND_DESCRIPTIONS, BOT_MENU_COMMANDS } from '../src/commons/constants/conversation.constant'
 import { TELEGRAM_ALLOWED_UPDATES, TELEGRAM_API_URL } from '../src/commons/constants/telegram.constant'
 
 const WEBHOOK_PATH = '/v1/telegram/webhook'
@@ -73,14 +73,13 @@ async function main() {
   }
 
   await call(token, 'setMyCommands', {
-    commands: Object.entries(BOT_COMMAND_DESCRIPTIONS).map(([command, description]) => ({ command, description })),
+    // Only the groups (P18, D128): the rest work typed and sit behind their buttons
+    commands: BOT_MENU_COMMANDS.map((command) => ({ command, description: BOT_COMMAND_DESCRIPTIONS[command] })),
   })
 
   await printWebhookInfo(token)
   console.log(
-    `Commands: ${Object.keys(BOT_COMMAND_DESCRIPTIONS)
-      .map((command) => `/${command}`)
-      .join(' ')}`,
+    `Menu: ${BOT_MENU_COMMANDS.map((command) => `/${command}`).join(' ')}`,
   )
 }
 

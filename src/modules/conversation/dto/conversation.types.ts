@@ -40,6 +40,7 @@ export interface ChannelMessage {
 export interface BotButton {
   label: string
   data: string // encoded BotActionPayload (see bot-action.codec.ts)
+  url?: string // a link button (/web): opens the page instead of sending data
 }
 
 export interface BotDocument {
@@ -48,9 +49,17 @@ export interface BotDocument {
   data: Buffer
 }
 
+export interface BotPhoto {
+  filename: string
+  mimeType: string
+  data: Buffer
+}
+
 export interface BotReply {
-  text: string // HTML: <b>, <i> and escaped user text; the caption when there is a document
+  text: string // HTML: <b>, <i> and escaped user text; the caption when there is a document or a photo
   document?: BotDocument // a file to send (Excel / PDF, D39); channels without files show only the text
+  photo?: BotPhoto // an image (/grafico): channels without images show only the text
+  keyboard?: 'show' | 'hide' // the fixed keyboard under the chat (/teclado): ➕ Rápido · 📝 Borrador · 📊 Consultar
   buttons?: BotButton[][]
   edit?: boolean // replace the message that had the pressed button instead of sending a new one
   editMessageId?: string // edit this earlier message instead (a split message closed on save, D75); no copy if it fails
@@ -81,4 +90,5 @@ export interface SavedExpense {
   id: string
   installments: InstallmentsCreated | null
   budget: BudgetImpact | null
+  trip: string | null // the open trip it was tagged with (/viaje, P18)
 }

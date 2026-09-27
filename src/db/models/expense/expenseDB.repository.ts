@@ -19,6 +19,7 @@ const CHARGE_FIELDS = {
   currency: true,
   amountInPen: true,
   paymentMethodId: true,
+  categoryId: true,
   personId: true,
   createdAt: true,
 } as const
@@ -192,6 +193,42 @@ export class ExpenseDBRepository {
       this.prisma.creditCardExpense.findMany({ where, select: CHARGE_SELECT.card }),
     ])
     return toCharges(daily, cards)
+  }
+
+  // /deshacer (P18): the rows of a saved expense (record, installments and shared debts) are deleted and it stops being
+  // saved. SavedExpenseLockedException when one of its debts already has payments
+  async deleteSavedExpense(draftId: string): Promise<void> {
+    await this.prisma.$transaction(async (tx) => {
+      await this.deleteRowsOf(tx, draftId)
+      await tx.expenseDraft.update({
+        where: { id: draftId },
+        data: { status: ExpenseDraftStatus.DISCARDED, pendingField: null },
+      })
+    })
+  }
+
+  // What each credit card charges in a billing period (its statement): the total, and the part in installments (P18,
+  // /tarjetas). The amount charged by the bank, not your part: it is what has to be paid
+  async findCardCycleTotals(period: { paymentMonth: number; paymentYear: number }) {
+    const rows = await this.prisma.creditCardExpense.findMany({
+      where: period,
+      select: { paymentMethodId: true, amount: true, amountInPen: true, installment: true },
+    })
+    const totals = new Map<string, { total: number; installments: number; count: number }>()
+    for (const row of rows) {
+      const current = totals.get(row.paymentMethodId) ?? { total: 0, installments: 0, count: 0 }
+      const pen = row.amountInPen ?? row.amount
+      current.total += pen
+      if (row.installment) current.installments += pen
+      current.count++
+      totals.set(row.paymentMethodId, current)
+    }
+    return [...totals].map(([paymentMethodId, value]) => ({
+      paymentMethodId,
+      total: Math.round(value.total * 100) / 100,
+      installments: Math.round(value.installments * 100) / 100,
+      count: value.count,
+    }))
   }
 
   // P21 reconciliation: card expenses bought (processDate) in a month, in soles

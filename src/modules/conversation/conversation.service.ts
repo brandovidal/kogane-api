@@ -9,6 +9,8 @@ import {
   CARD_DAYS_FIELD_PREFIX,
   ChannelMessageType,
   BATCH_ACTIONS,
+  KEYBOARD_COMMANDS,
+  TOOL_ACTIONS,
   DEBT_PAYMENT_ACTIONS,
   NOTIFICATION_ACTIONS,
   FREE_CORRECTION_FIELD,
@@ -29,6 +31,7 @@ import {
   REVIEW_EXPENSE_DRAFT_STATUSES,
 } from '@/commons/constants/expense-draft.constant'
 import { CatalogKind, ExpenseField } from '@/commons/constants/expense-extraction.constant'
+import { dayStart } from '@/commons/helpers/charge.helper'
 import { DateHelper } from '@/commons/helpers/date.helper'
 import { DuplicateExpenseDraftException } from '@/commons/exceptions/expense-draft/duplicate-expense-draft.exception'
 import { StoredFileExpiredException } from '@/commons/exceptions/stored-file/stored-file-expired.exception'
@@ -79,7 +82,12 @@ import {
   formatPersonDebts,
   REPORT_FOR_EVERYONE,
 } from './debt.messages'
+import { encodeBotAction } from './bot-action.codec'
 import { ExpenseSaverService } from './expense-saver.service'
+import { BotToolsService } from './tools/bot-tools.service'
+import { helpHub } from './tools/hubs.messages'
+import { EXPORT_TEXTS, monthUsage } from './tools/spending.messages'
+import { TRIP_TEXTS } from './tools/trip.messages'
 import { MediaDownloaderRegistry } from './media-downloader.registry'
 import { needsInstallmentConfirmation, toExpenseFields, toExpenseDraftUpdate } from './expense-draft.mapper'
 import {
@@ -90,11 +98,12 @@ import {
   buildBatchReply,
   buildParkedNotice,
   buildSavedNotice,
+  conceptOf,
+  nameOf,
   buildInstallmentsConfirmReply,
   MONTH_NAMES,
   buildExpenseReply,
   buildDraftReplies,
-  buildHelpReply,
   buildSavedSearchReply,
   buildClosedShareReply,
   buildShareReply,
@@ -169,6 +178,7 @@ export class ConversationService {
     private readonly budgetService: BudgetService,
     private readonly reportsService: ReportsService,
     private readonly notificationsBotService: NotificationsBotService,
+    private readonly botToolsService: BotToolsService,
   ) {}
 
   async handle(message: ChannelMessage): Promise<ConversationResult> {
@@ -197,6 +207,21 @@ export class ConversationService {
     // The amount asked by ✏️ Editar monto of a reminder (P20); any other text drops that wait
     const amountReply = await this.notificationsBotService.answerAmount(message.chatId, text)
     if (amountReply) return amountReply
+
+    // A key of the fixed keyboard (/teclado) is a command
+    const key = KEYBOARD_COMMANDS[text]
+    if (key) return this.handleCommand({ ...message, type: ChannelMessageType.COMMAND, command: key, text: `/${key}` })
+
+    // A command from a button that asked for its text (/buscar, /pregunta, /viaje…): this message is its argument (P18)
+    const waiting = this.botToolsService.takeAwaiting(message.chatId)
+    if (waiting) {
+      return this.handleCommand({
+        ...message,
+        type: ChannelMessageType.COMMAND,
+        command: waiting,
+        text: `/${waiting} ${text}`,
+      })
+    }
 
     const active = await this.findActive(message)
 
@@ -450,6 +475,8 @@ export class ConversationService {
     if (expenseDraft.inputType === ExpenseDraftInputType.IMAGE) {
       expenses = expenses.map((expense) => withPrimaryCard(expense, catalog))
     }
+    // What the bot learned from earlier corrections (/reglas, D129)
+    expenses = await this.botToolsService.applyRules(expenses, catalog)
 
     for (const [index, expense] of expenses.entries()) {
       const target =
@@ -556,6 +583,8 @@ export class ConversationService {
       expenseDraft.id,
       keepEditing(expenseDraft, toExpenseDraftUpdate(expense)),
     )
+    // A chosen category or payment method is remembered for that merchant (/reglas, D129)
+    await this.botToolsService.learnRule(toExpenseFields(expenseDraft), correction)
 
     return [this.replyFor(updated, catalog, edit), ...this.shareRepliesAfter(expenseDraft, updated, catalog)]
   }
@@ -663,6 +692,7 @@ export class ConversationService {
       return { replies }
     }
     if (action.name === BotAction.EDIT_SAVED) return this.startEdit(message, action.draftId)
+    if (TOOL_ACTIONS.includes(action.name)) return this.handleToolAction(message, action)
     // Reminder buttons and /avisos (P20): draftId carries the notification id or the kind
     if (NOTIFICATION_ACTIONS.includes(action.name))
       return this.notificationsBotService.handleAction(message.chatId, action)
@@ -827,6 +857,8 @@ export class ConversationService {
   }
 
   private async handleCommand(message: ChannelMessage): Promise<BotReply[]> {
+    // A command drops the text another one was waiting for
+    this.botToolsService.clearAwaiting(message.chatId)
     switch (message.command) {
       case BotCommand.CANCEL: {
         const count = await this.expenseDraftDBRepository.discardOpenByChat(message.channel, message.chatId)
@@ -860,9 +892,10 @@ export class ConversationService {
         return buildDraftReplies(items, total, catalog)
       }
       case BotCommand.SUMMARY: {
-        const today = DateHelper.todayIn(APP_TIME_ZONE)
-        const month = Number(today.slice(5, 7))
-        const year = Number(today.slice(0, 4))
+        // "/resumen agosto", "/resumen 8 2026": any month (P18); alone, this one
+        const period = parseMonthArg(this.commandArgs(message), DateHelper.todayIn(APP_TIME_ZONE))
+        if (!period) return [{ text: monthUsage('📊', 'resumen') }]
+        const { month, year } = period
         const [totals, catalog] = await Promise.all([
           this.expenseDBRepository.findMonthlyTotals(month, year),
           this.expenseExtractionService.loadCatalog(),
@@ -879,6 +912,7 @@ export class ConversationService {
       case BotCommand.COLLECT:
         return [{ text: await this.collectCommand(this.commandArgs(message)) }]
       case BotCommand.EDIT:
+      case BotCommand.SEARCH: // the same search: pick a result to see it or edit it
         return [await this.searchSaved(message)]
       case BotCommand.BUDGET: {
         const today = DateHelper.todayIn(APP_TIME_ZONE)
@@ -901,7 +935,8 @@ export class ConversationService {
         return [{ text: formatForecast(month, year, day, daysInMonth, view) }]
       }
       default:
-        return [buildHelpReply()]
+        // The groups of the menu and the commands inside them (P18); anything else shows the help
+        return (await this.botToolsService.handleCommand(message)) ?? [helpHub()]
     }
   }
 
@@ -1019,17 +1054,24 @@ export class ConversationService {
       if (error instanceof SavedExpenseLockedException) return { replies: [{ text: TEXTS.editLocked }] }
       throw error
     }
-    const { installments, budget } = result
+    const { installments, budget, trip } = result
     const saved = { ...expenseDraft, status: ExpenseDraftStatus.SAVED }
     const label = DESTINATION_LABELS[expenseDraft.destination as ExpenseDestination]
     const closed = buildClosedReply(`✅ <b>Guardado en ${label}</b>`, saved, catalog)
     const notice = buildSavedNotice(saved, label, installments, formatSharedDebts(expenseDraft, catalog))
     const alert = await this.budgetAlert(budget)
+    // ↩️ Deshacer and the commands as buttons instead of the "Ver: /ultimos · /resumen" line (P18)
+    const undo = { label: '↩️ Deshacer', data: encodeBotAction({ name: BotAction.UNDO, draftId: expenseDraft.id }) }
+    const withButtons = {
+      ...notice,
+      text: `${notice.text.replace(/\nVer: .*$/, '')}${trip ? `\n${TRIP_TEXTS.label(trip)}` : ''}`,
+      buttons: [[undo], ...commandButtons(BotCommand.RECENT, BotCommand.SUMMARY)],
+    }
     return {
       replies: [
         { ...closed, edit },
         ...this.closeShare(saved, catalog),
-        alert ? { ...notice, text: `${alert}\n${notice.text}` } : notice,
+        alert ? { ...withButtons, text: `${alert}\n${withButtons.text}` } : withButtons,
       ],
       notice: TEXTS.saved,
     }
@@ -1163,7 +1205,11 @@ export class ConversationService {
   // /editar <texto> (D76): saved expenses matching the amount, date, catalog names and the rest of the text
   private async searchSaved(message: ChannelMessage): Promise<BotReply> {
     const args = this.commandArgs(message)
-    if (!args) return { text: TEXTS.editUsage }
+    if (!args) {
+      // From a button: ask what to search and take the next message as the text
+      this.botToolsService.await(message.chatId, message.command as BotCommand)
+      return { text: TEXTS.editUsage }
+    }
     const catalog = await this.expenseExtractionService.loadCatalog()
     const filters = parseSavedSearch(args, catalog, DateHelper.todayIn(APP_TIME_ZONE))
     const results = await this.expenseDraftDBRepository.searchSaved(
@@ -1186,6 +1232,56 @@ export class ConversationService {
     const copy = await this.expenseDraftDBRepository.createEditCopy(original, `edit:${randomUUID()}`)
     const catalog = await this.expenseExtractionService.loadCatalog()
     return { replies: [this.replyFor(copy, catalog), ...this.shareReplies(copy, catalog)] }
+  }
+
+  // The buttons of the tools (P18): ⚡ a repeated expense, ↩️ /deshacer
+  private async handleToolAction(message: ChannelMessage, action: BotActionPayload): Promise<ConversationResult> {
+    switch (action.name) {
+      case BotAction.QUICK:
+        return this.saveQuick(message, action.draftId)
+      case BotAction.UNDO:
+        return { replies: [await this.botToolsService.undoConfirm(message.chatId, action.draftId)] }
+      case BotAction.UNDO_CANCEL:
+        return { replies: [this.botToolsService.undoCancel()] }
+      case BotAction.RULE_DELETE: {
+        const { reply, notice } = await this.botToolsService.removeRule(action.draftId)
+        return { replies: [reply], notice }
+      }
+      case BotAction.EXPORT: {
+        const file = await this.botToolsService.exportFile(action)
+        return file ? { replies: [file], notice: EXPORT_TEXTS.sent } : { replies: [], notice: TEXTS.alreadyProcessed }
+      }
+      default:
+        return { replies: [], notice: TEXTS.alreadyProcessed }
+    }
+  }
+
+  // ⚡ of /rapido: the same expense again, today, saved at once (no AI, no questions)
+  private async saveQuick(message: ChannelMessage, key: string): Promise<ConversationResult> {
+    const source = await this.botToolsService.quickExpense(key)
+    if (!source) return { replies: [], notice: 'Ese gasto ya no está en tus rápidos' }
+
+    const copy = await this.expenseDraftDBRepository.createQuickCopy(
+      source,
+      { channel: message.channel, chatId: message.chatId, messageId: `quick:${randomUUID()}` },
+      dayStart(DateHelper.todayIn(APP_TIME_ZONE)),
+    )
+    const [catalog, result] = await Promise.all([
+      this.expenseExtractionService.loadCatalog(),
+      this.expenseSaverService.save(copy),
+    ])
+    const saved = { ...copy, status: ExpenseDraftStatus.SAVED }
+    const alert = await this.budgetAlert(result.budget)
+    const text = `⚡ Guardado: ${conceptOf(saved)} · ${nameOf(catalog, saved.paymentMethodId)}${result.trip ? `\n${TRIP_TEXTS.label(result.trip)}` : ''}${alert ? `\n${alert}` : ''}`
+    return {
+      replies: [
+        {
+          text,
+          buttons: [[{ label: '↩️ Deshacer', data: encodeBotAction({ name: BotAction.UNDO, draftId: copy.id }) }]],
+        },
+      ],
+      notice: TEXTS.saved,
+    }
   }
 
   private replyFor(expenseDraft: ExpenseDraftDbDto, catalog: ExtractionCatalog, edit = false): BotReply {

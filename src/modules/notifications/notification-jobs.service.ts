@@ -3,8 +3,8 @@ import { Injectable, Logger } from '@nestjs/common'
 import { APP_TIME_ZONE } from '@/commons/constants/app.constant'
 import { CalendarEventKind, CalendarEventStatus } from '@/commons/constants/calendar.constant'
 import { DebtDirection, toCents } from '@/commons/constants/debt.constant'
-import { Currency } from '@/commons/constants/expense.constant'
 import { ANOMALY_LOOKBACK_DAYS, NotificationJob } from '@/commons/constants/notification.constant'
+import { dayStart, ownPen } from '@/commons/helpers/charge.helper'
 import { DateHelper } from '@/commons/helpers/date.helper'
 import { addMonths } from '@/commons/helpers/payment-period.helper'
 import { CalendarDBRepository } from '@/db/models/calendar/calendarDB.repository'
@@ -39,8 +39,6 @@ export interface JobResult {
   details?: Record<string, unknown>
 }
 
-const dayStart = (isoDay: string) => new Date(`${isoDay}T00:00:00.000Z`)
-
 const toChargeRow = (row: ChargeDbDto): ChargeRow => ({
   id: row.id,
   source: row.source,
@@ -50,10 +48,6 @@ const toChargeRow = (row: ChargeDbDto): ChargeRow => ({
   paymentMethodId: row.paymentMethodId,
   date: isoDate(row.date),
 })
-
-// Your part of an expense in soles (D73): what others owe is theirs
-const ownPen = (row: ChargeDbDto) =>
-  row.currency === Currency.PEN ? toCents((row.amountInPen ?? row.amount) - row.othersShare) : 0
 
 // The scheduled jobs of P20 (D87), run by the BullMQ worker at their time (America/Lima) or by hand with
 // POST /v1/notifications/run/:job. Each notice has a dedupeKey, so running a job twice sends nothing twice.

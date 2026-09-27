@@ -24,10 +24,26 @@ import { BudgetSettingDBRepository, subscriptionCounts } from '@/db/models/budge
 import { ExpenseDBRepository } from '@/db/models/expense/expenseDB.repository'
 import { SaveExpenseDbDto } from '@/db/models/expense/expenseDB.dto'
 import { PaymentMethodDBRepository } from '@/db/models/payment-method/paymentMethodDB.repository'
+import { TripDBRepository } from '@/db/models/trip/tripDB.repository'
 import { StoredFilesService } from '@/modules/stored-files/stored-files.service'
 
 import { BudgetImpact, InstallmentsCreated, SavedExpense } from './dto/conversation.types'
 import { sharesOf } from './shared-expense.parser'
+
+// The destinations a trip tags: what is spent day to day and with a card
+const TRIP_DESTINATIONS: string[] = [ExpenseDestination.DAILY, ExpenseDestination.CREDIT_CARD]
+
+function withTrip(input: SaveExpenseDbDto, tripId: string | null): SaveExpenseDbDto {
+  if (!tripId || !TRIP_DESTINATIONS.includes(input.destination)) return input
+  if (input.destination === ExpenseDestination.CREDIT_CARD) {
+    return {
+      ...input,
+      data: { ...input.data, tripId },
+      nextInstallments: input.nextInstallments.map((row) => ({ ...row, tripId })),
+    }
+  }
+  return { ...input, data: { ...input.data, tripId } } as SaveExpenseDbDto
+}
 
 // One row per installment (debts D60, credit cards D66): "1/n" creates the n installments, one per month; "3/6"
 // only that one (the others were registered before). The amount is always the installment's.
@@ -166,12 +182,18 @@ export class ExpenseSaverService {
     private readonly paymentMethodDBRepository: PaymentMethodDBRepository,
     private readonly storedFilesService: StoredFilesService,
     private readonly budgetSettingDBRepository: BudgetSettingDBRepository,
+    private readonly tripDBRepository: TripDBRepository,
   ) {}
 
   async save(expenseDraft: ExpenseDraftDbDto): Promise<SavedExpense> {
     this.assertComplete(expenseDraft)
 
-    const input = withSharedDebts(withOrigin(await this.buildInput(expenseDraft), expenseDraft.id), expenseDraft)
+    // Day-to-day and card expenses saved while a trip is open belong to it (/viaje, P18)
+    const trip = await this.tripDBRepository.findActive()
+    const input = withTrip(
+      withSharedDebts(withOrigin(await this.buildInput(expenseDraft), expenseDraft.id), expenseDraft),
+      trip?.id ?? null,
+    )
     const saved = await this.expenseDBRepository.saveFromExpenseDraft(
       expenseDraft.id,
       input,
@@ -181,6 +203,7 @@ export class ExpenseSaverService {
     return {
       ...saved,
       installments: installmentsCreated(input),
+      trip: trip && TRIP_DESTINATIONS.includes(input.destination) ? trip.name : null,
       budget: budgetImpact(input, await this.subscriptionCounts(input)),
     }
   }

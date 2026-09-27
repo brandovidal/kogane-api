@@ -99,4 +99,55 @@ describe('ReportsService', () => {
     )
     expect(mockDebts.summary).not.toHaveBeenCalled()
   })
+  describe('expenses (P18, /exportar)', () => {
+    const rows = [
+      {
+        date: '2026-09-02',
+        description: 'Pollo',
+        category: 'Comida',
+        method: 'Yape',
+        amount: 30,
+        currency: 'PEN',
+        own: 30,
+      },
+      {
+        date: '2026-09-03',
+        description: 'Taxi',
+        category: null,
+        method: null,
+        amount: 12.5,
+        currency: 'PEN',
+        own: 12.5,
+      },
+      {
+        date: '2026-09-05',
+        description: 'Cena',
+        category: 'Comida',
+        method: 'CMR',
+        amount: 80,
+        currency: 'PEN',
+        own: 40,
+      },
+    ]
+
+    it('should write the charges and the total by category in an Excel with the name of the month', async () => {
+      const file = await service.expenses(ReportFormat.XLSX, { month: 9, year: 2026 }, rows)
+
+      expect(file.filename).toBe('gastos-2026-09.xlsx')
+      const workbook = new ExcelJS.Workbook()
+      await workbook.xlsx.load(file.data as unknown as ArrayBuffer)
+      const summary = workbook.getWorksheet('Por categoría')!
+      expect(summary.getRow(2).values).toEqual([undefined, 'Comida', 70])
+      expect(summary.getRow(3).values).toEqual([undefined, 'Sin categoría', 12.5])
+      expect(summary.getRow(4).values).toEqual([undefined, 'Total', 82.5])
+      expect(workbook.getWorksheet('Gastos')!.rowCount).toBe(5) // header + 3 charges + total
+    })
+
+    it('should write a PDF', async () => {
+      const file = await service.expenses(ReportFormat.PDF, { month: 9, year: 2026 }, rows)
+
+      expect(file.filename).toBe('gastos-2026-09.pdf')
+      expect(file.data.subarray(0, 4).toString()).toBe('%PDF')
+    })
+  })
 })

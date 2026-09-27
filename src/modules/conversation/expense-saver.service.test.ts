@@ -12,6 +12,7 @@ import {
   DEFAULT_BUDGET_SETTINGS,
 } from '@/db/models/budget-setting/budgetSettingDB.repository'
 import { ExpenseDBRepository } from '@/db/models/expense/expenseDB.repository'
+import { TripDBRepository } from '@/db/models/trip/tripDB.repository'
 import { PaymentMethodDBRepository } from '@/db/models/payment-method/paymentMethodDB.repository'
 import { StoredFilesService } from '@/modules/stored-files/stored-files.service'
 
@@ -22,6 +23,7 @@ const mockExpenseDBRepository = { saveFromExpenseDraft: vi.fn() }
 const mockPaymentMethodDBRepository = { findById: vi.fn() }
 const mockStoredFilesService = { keep: vi.fn() }
 const mockBudgetSettingDBRepository = { get: vi.fn() }
+const mockTripDBRepository = { findActive: vi.fn() }
 
 describe('ExpenseSaverService', () => {
   let service: ExpenseSaverService
@@ -34,12 +36,14 @@ describe('ExpenseSaverService', () => {
         { provide: PaymentMethodDBRepository, useValue: mockPaymentMethodDBRepository },
         { provide: StoredFilesService, useValue: mockStoredFilesService },
         { provide: BudgetSettingDBRepository, useValue: mockBudgetSettingDBRepository },
+        { provide: TripDBRepository, useValue: mockTripDBRepository },
       ],
     }).compile()
 
     service = module.get<ExpenseSaverService>(ExpenseSaverService)
     mockExpenseDBRepository.saveFromExpenseDraft.mockResolvedValue({ id: 'expense-1' })
     mockBudgetSettingDBRepository.get.mockResolvedValue(DEFAULT_BUDGET_SETTINGS)
+    mockTripDBRepository.findActive.mockResolvedValue(null)
   })
 
   afterEach(() => {
@@ -76,6 +80,7 @@ describe('ExpenseSaverService', () => {
     await expect(service.save(buildExpenseDraft())).resolves.toEqual({
       id: 'expense-1',
       installments: null,
+      trip: null,
       // what the budget of its category gets (P19): a fixed cost counts in its payment month
       budget: {
         personId: 'person-danery',
@@ -430,6 +435,46 @@ describe('ExpenseSaverService', () => {
         expect.anything(),
         'draft-original',
       )
+    })
+  })
+
+  describe('trips (/viaje, P18)', () => {
+    beforeEach(() => mockTripDBRepository.findActive.mockResolvedValue({ id: 'trip-1', name: 'Lima' }))
+
+    it('should tag a day-to-day expense with the open trip and say which one', async () => {
+      const saved = await service.save(buildExpenseDraft({ destination: ExpenseDestination.DAILY }))
+
+      expect(savedInput().data.tripId).toBe('trip-1')
+      expect(saved.trip).toBe('Lima')
+    })
+
+    it('should tag a card expense and each of its installments', async () => {
+      mockPaymentMethodDBRepository.findById.mockResolvedValue({
+        id: 'pm',
+        type: PaymentMethodType.CREDIT_CARD,
+        billingCloseDay: 25,
+      })
+
+      await service.save(buildExpenseDraft({ destination: ExpenseDestination.CREDIT_CARD, installment: '1/3' }))
+
+      expect(savedInput().data.tripId).toBe('trip-1')
+      expect(savedInput().nextInstallments.map((row: { tripId: string }) => row.tripId)).toEqual(['trip-1', 'trip-1'])
+    })
+
+    it('should not tag what a trip does not cover: fixed costs, subscriptions and debts', async () => {
+      const fixed = await service.save(buildExpenseDraft({ destination: ExpenseDestination.FIXED_COST }))
+
+      expect(savedInput().data.tripId).toBeUndefined()
+      expect(fixed.trip).toBeNull()
+    })
+
+    it('should tag nothing when no trip is open', async () => {
+      mockTripDBRepository.findActive.mockResolvedValue(null)
+
+      const saved = await service.save(buildExpenseDraft({ destination: ExpenseDestination.DAILY }))
+
+      expect(savedInput().data.tripId).toBeUndefined()
+      expect(saved.trip).toBeNull()
     })
   })
 

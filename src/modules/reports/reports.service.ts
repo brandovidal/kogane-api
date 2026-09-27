@@ -45,12 +45,47 @@ const slug = (text: string) =>
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-|-$/g, '')
 
+// One expense of a month, as the export shows it (P18, /exportar): your part in soles next to what was charged
+export interface ExpenseReportRow {
+  date: string // YYYY-MM-DD
+  description: string
+  category: string | null
+  method: string | null
+  amount: number
+  currency: string
+  own: number
+}
+
+const MONTH_TITLES = [
+  'Enero',
+  'Febrero',
+  'Marzo',
+  'Abril',
+  'Mayo',
+  'Junio',
+  'Julio',
+  'Agosto',
+  'Setiembre',
+  'Octubre',
+  'Noviembre',
+  'Diciembre',
+]
+const NO_CATEGORY = 'Sin categoría'
+const round2 = (amount: number) => Math.round(amount * 100) / 100
+
 interface DebtReportData {
   title: string
   today: string
   summary: PersonDebtSummary[]
   detail: DebtView[]
   sourceSummary: { personId: string; person: string; source: string; direction: string; count: number; total: number }[]
+}
+
+interface ExpenseReportData {
+  title: string
+  rows: ExpenseReportRow[]
+  categories: { name: string; total: number }[]
+  total: number
 }
 
 interface DebtReportFilters {
@@ -172,6 +207,88 @@ export class ReportsService {
       mimeType: REPORT_MIME_TYPES[format],
       data: format === ReportFormat.XLSX ? await this.debtsXlsx(data) : await this.debtsPdf(data),
     }
+  }
+
+  // Your expenses of a month (P18, /exportar): every charge, and the total by category
+  async expenses(
+    format: ReportFormat,
+    { month, year }: { month: number; year: number },
+    rows: ExpenseReportRow[],
+  ): Promise<ReportFile> {
+    const byCategory = new Map<string, number>()
+    for (const row of rows) {
+      const name = row.category ?? NO_CATEGORY
+      byCategory.set(name, round2((byCategory.get(name) ?? 0) + row.own))
+    }
+    const categories = [...byCategory].map(([name, total]) => ({ name, total })).sort((a, b) => b.total - a.total)
+    const total = round2(rows.reduce((sum, row) => sum + row.own, 0))
+    const title = `Gastos · ${MONTH_TITLES[month - 1]} ${year}`
+    const data = { title, rows, categories, total }
+    return {
+      filename: `gastos-${year}-${String(month).padStart(2, '0')}.${format}`,
+      mimeType: REPORT_MIME_TYPES[format],
+      data: format === ReportFormat.XLSX ? await this.expensesXlsx(data) : await this.expensesPdf(data),
+    }
+  }
+
+  private async expensesXlsx({ rows, categories, total }: ExpenseReportData): Promise<Buffer> {
+    const workbook = new ExcelJS.Workbook()
+    workbook.creator = 'Kogane'
+
+    const detail = workbook.addWorksheet('Gastos')
+    detail.columns = [
+      { header: 'Fecha', key: 'date', width: 12 },
+      { header: 'Concepto', key: 'description', width: 34 },
+      { header: 'Categoría', key: 'category', width: 20 },
+      { header: 'Medio', key: 'method', width: 18 },
+      { header: 'Monto', key: 'amount', width: 13, style: { numFmt: '#,##0.00' } },
+      { header: 'Moneda', key: 'currency', width: 8 },
+      { header: 'Tu parte (S/)', key: 'own', width: 14, style: { numFmt: MONEY_FORMAT } },
+    ]
+    detail.addRows(rows.map((row) => ({ ...row, category: row.category ?? NO_CATEGORY, method: row.method ?? '' })))
+    detail.addRow({ description: 'Total', own: total }).font = { bold: true }
+
+    const summary = workbook.addWorksheet('Por categoría')
+    summary.columns = [
+      { header: 'Categoría', key: 'name', width: 24 },
+      { header: 'Tu parte (S/)', key: 'total', width: 14, style: { numFmt: MONEY_FORMAT } },
+    ]
+    summary.addRows(categories)
+    summary.addRow({ name: 'Total', total }).font = { bold: true }
+
+    for (const sheet of [detail, summary]) {
+      sheet.getRow(1).font = { bold: true }
+      sheet.views = [{ state: 'frozen', ySplit: 1 }]
+    }
+    return Buffer.from(await workbook.xlsx.writeBuffer())
+  }
+
+  private expensesPdf({ title, rows, categories, total }: ExpenseReportData): Promise<Buffer> {
+    const doc = new PDFDocument({ size: 'A4', margin: 40 })
+    const chunks: Buffer[] = []
+    doc.on('data', (chunk: Buffer) => chunks.push(chunk))
+    const done = new Promise<Buffer>((resolve) => doc.on('end', () => resolve(Buffer.concat(chunks))))
+
+    doc.font('Helvetica-Bold').fontSize(16).text(title)
+    doc.font('Helvetica').fontSize(9).fillColor('#666').text('Kogane · tu parte en soles').fillColor('#000')
+    doc.moveDown()
+    this.pdfTable(
+      doc,
+      ['Categoría', 'Tu parte'],
+      [300, 100],
+      [...categories.map((category) => [category.name, money(category.total)]), ['Total', money(total)]],
+    )
+
+    doc.moveDown().font('Helvetica-Bold').fontSize(12).text('Detalle')
+    doc.moveDown(0.3)
+    this.pdfTable(
+      doc,
+      ['Fecha', 'Concepto', 'Categoría', 'Medio', 'Tu parte'],
+      [55, 160, 100, 100, 100],
+      rows.map((row) => [row.date, row.description, row.category ?? NO_CATEGORY, row.method ?? '', money(row.own)]),
+    )
+    doc.end()
+    return done
   }
 
   private async debtsXlsx({ summary, detail }: DebtReportData): Promise<Buffer> {

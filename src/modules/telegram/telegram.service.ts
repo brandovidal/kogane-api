@@ -25,7 +25,7 @@ import { ConversationService } from '@/modules/conversation/conversation.service
 import { TEXTS, withCommandButtons } from '@/modules/conversation/conversation.messages'
 import { MediaDownloaderRegistry } from '@/modules/conversation/media-downloader.registry'
 
-import { mapTelegramUpdate, MappedTelegramUpdate, toReplyMarkup } from './telegram.mapper'
+import { mapTelegramUpdate, MappedTelegramUpdate, toKeyboardMarkup, toReplyMarkup } from './telegram.mapper'
 import { TelegramReplyMarkup, TelegramUpdate } from '@/providers/telegram/telegram.types'
 
 const ERROR_TEXT = '⚠️ Algo salió mal procesando tu mensaje. Intenta de nuevo en un momento.'
@@ -206,6 +206,10 @@ export class TelegramService implements OnModuleInit, OnApplicationBootstrap, Be
 
         if (reply.document) {
           await this.telegramClient.sendDocument(chatId, reply.document, reply.text)
+        } else if (reply.photo) {
+          await this.telegramClient.sendPhoto(chatId, reply.photo, reply.text)
+        } else if (reply.keyboard) {
+          await this.telegramClient.sendMessage(chatId, reply.text, toKeyboardMarkup(reply.keyboard))
         } else if (reply.editMessageId) {
           // Closing an earlier message (a split message on save): nothing new to say if it cannot be edited
           await this.telegramClient

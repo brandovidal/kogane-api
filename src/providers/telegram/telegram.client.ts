@@ -60,6 +60,18 @@ export class TelegramClient {
     return this.call('sendDocument', form)
   }
 
+  // An image (/grafico): a PNG or JPEG, with its caption
+  sendPhoto(chatId: string, file: { filename: string; mimeType: string; data: Buffer }, caption?: string) {
+    const form = new FormData()
+    form.append('chat_id', chatId)
+    if (caption) {
+      form.append('caption', caption)
+      form.append('parse_mode', TELEGRAM_PARSE_MODE)
+    }
+    form.append('photo', new Blob([new Uint8Array(file.data)], { type: file.mimeType }), file.filename)
+    return this.call('sendPhoto', form)
+  }
+
   answerCallbackQuery(callbackQueryId: string, text?: string) {
     return this.call('answerCallbackQuery', { callback_query_id: callbackQueryId, text })
   }

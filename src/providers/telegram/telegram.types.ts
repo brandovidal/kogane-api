@@ -72,12 +72,15 @@ export interface TelegramUpdate {
 
 export interface TelegramInlineKeyboardButton {
   text: string
-  callback_data: string
+  callback_data?: string
+  url?: string // a link button
 }
 
-export interface TelegramReplyMarkup {
-  inline_keyboard: TelegramInlineKeyboardButton[][]
-}
+// Buttons under the message, or the fixed keyboard under the chat (/teclado) and its removal
+export type TelegramReplyMarkup =
+  | { inline_keyboard: TelegramInlineKeyboardButton[][] }
+  | { keyboard: { text: string }[][]; resize_keyboard: true; is_persistent: true }
+  | { remove_keyboard: true }
 
 // https://core.telegram.org/bots/api#webhookinfo (subset)
 export interface TelegramWebhookInfo {

@@ -30,6 +30,7 @@ import { RecognitionService } from '@/modules/recognition/recognition.service'
 import { BudgetService } from '@/modules/budget/budget.service'
 import { ReportsService } from '@/modules/reports/reports.service'
 import { NotificationsBotService } from '@/modules/notifications/notifications-bot.service'
+import { BotToolsService } from './tools/bot-tools.service'
 import { RecognizedScreen } from '@/modules/recognition/recognition.templates'
 
 import { ConversationService } from './conversation.service'
@@ -62,6 +63,7 @@ const mockExpenseDraftDB = {
   findOpenByBatch: vi.fn(),
   searchSaved: vi.fn(),
   createEditCopy: vi.fn(),
+  createQuickCopy: vi.fn(),
 }
 const mockExpenseDB = { findMonthlyTotals: vi.fn() }
 const mockMediaDownloader = { download: vi.fn() }
@@ -99,6 +101,20 @@ const mockNotificationsBot = {
   installmentsReply: vi.fn(),
 }
 const mockPaymentMethodDB = { create: vi.fn(), updateBillingDays: vi.fn() }
+// The groups of the menu and their commands (P18) have their own tests: here only how the conversation hands over to them
+const mockBotTools = {
+  handleCommand: vi.fn(),
+  takeAwaiting: vi.fn(),
+  clearAwaiting: vi.fn(),
+  await: vi.fn(),
+  quickExpense: vi.fn(),
+  undoConfirm: vi.fn(),
+  undoCancel: vi.fn(),
+  applyRules: vi.fn(),
+  learnRule: vi.fn(),
+  removeRule: vi.fn(),
+  exportFile: vi.fn(),
+}
 
 const action = (name: BotAction, field?: string, value?: string): ChannelMessage => ({
   channel: ExpenseDraftChannel.TELEGRAM,
@@ -135,6 +151,7 @@ describe('ConversationService', () => {
         { provide: BudgetService, useValue: mockBudget },
         { provide: ReportsService, useValue: mockReports },
         { provide: NotificationsBotService, useValue: mockNotificationsBot },
+        { provide: BotToolsService, useValue: mockBotTools },
       ],
     }).compile()
 
@@ -142,6 +159,9 @@ describe('ConversationService', () => {
 
     mockExtraction.loadCatalog.mockResolvedValue(mockCatalog)
     mockNotificationsBot.answerAmount.mockResolvedValue(null)
+    mockBotTools.handleCommand.mockResolvedValue(null)
+    mockBotTools.takeAwaiting.mockReturnValue(null)
+    mockBotTools.applyRules.mockImplementation(async (expenses: unknown) => expenses)
     mockSaver.save.mockResolvedValue({ id: 'expense-1', installments: null, budget: null })
     mockBudget.alertAfterSave.mockResolvedValue(null)
     mockExpenseDraftDB.findOpenByChat.mockResolvedValue(null)
@@ -731,10 +751,11 @@ describe('ConversationService', () => {
       expect(result.replies[0]).toMatchObject({ edit: true, text: expect.stringContaining('Guardado en Costo fijo') })
       expect(result.replies[0].buttons).toBeUndefined()
       // and a new message at the end of the chat, which does notify
-      // "Ver: /ultimos · /resumen" becomes buttons
+      // "Ver: /ultimos · /resumen" becomes buttons, after ↩️ Deshacer (P18)
       expect(result.replies[1]).toEqual({
         text: '✅ Guardado: Almuerzo S/ 25.00 en Costo fijo.',
         buttons: [
+          [{ label: '↩️ Deshacer', data: `und:${FILE_ID}` }],
           [
             { label: '🧾 Últimos', data: 'cmd:ultimos' },
             { label: '📊 Resumen', data: 'cmd:resumen' },
@@ -830,13 +851,128 @@ describe('ConversationService', () => {
     })
   })
 
+  describe('the tools of the menu groups (P18)', () => {
+    it('should save a ⚡ quick expense at once, dated today, and offer to undo it', async () => {
+      const source = buildExpenseDraft({ description: 'Café', amount: 8 })
+      mockBotTools.quickExpense.mockResolvedValue(source)
+      mockExpenseDraftDB.createQuickCopy.mockResolvedValue({ ...source, id: 'copy-1' })
+
+      const result = await service.handle({
+        ...action(BotAction.QUICK),
+        action: { name: BotAction.QUICK, draftId: 'abc123' },
+      })
+
+      expect(mockBotTools.quickExpense).toHaveBeenCalledWith('abc123')
+      expect(mockExpenseDraftDB.createQuickCopy).toHaveBeenCalledWith(
+        source,
+        { channel: ExpenseDraftChannel.TELEGRAM, chatId: CHAT_ID, messageId: expect.stringMatching(/^quick:/) },
+        expect.any(Date),
+      )
+      expect(mockSaver.save).toHaveBeenCalledWith(expect.objectContaining({ id: 'copy-1' }))
+      expect(result.replies[0].text).toContain('⚡ Guardado')
+      expect(result.replies[0].buttons).toEqual([[{ label: '↩️ Deshacer', data: 'und:copy-1' }]])
+      expect(mockExpenseDraftDB.update).not.toHaveBeenCalled()
+    })
+
+    it('should say a ⚡ button is old when the expense is no longer repeated, and save nothing', async () => {
+      mockBotTools.quickExpense.mockResolvedValue(null)
+
+      const result = await service.handle({
+        ...action(BotAction.QUICK),
+        action: { name: BotAction.QUICK, draftId: 'old' },
+      })
+
+      expect(result.notice).toContain('ya no está')
+      expect(mockSaver.save).not.toHaveBeenCalled()
+    })
+
+    it('should confirm or cancel /deshacer through its buttons', async () => {
+      mockBotTools.undoConfirm.mockResolvedValue({ text: '↩️ Anulé' })
+      mockBotTools.undoCancel.mockReturnValue({ text: '👍' })
+
+      expect((await service.handle(action(BotAction.UNDO))).replies[0].text).toBe('↩️ Anulé')
+      expect(mockBotTools.undoConfirm).toHaveBeenCalledWith(CHAT_ID, FILE_ID)
+      expect((await service.handle(action(BotAction.UNDO_CANCEL))).replies[0].text).toBe('👍')
+    })
+
+    it('should remember the category or the method the user chose for that merchant', async () => {
+      mockExpenseDraftDB.findById.mockResolvedValue(
+        buildExpenseDraft({ status: ExpenseDraftStatus.AWAITING_CONFIRMATION, merchant: 'Bembos' }),
+      )
+
+      await service.handle(action(BotAction.SET_FIELD, ExpenseField.PAYMENT_METHOD, 'method-ohpay'))
+
+      expect(mockBotTools.learnRule).toHaveBeenCalledWith(
+        expect.objectContaining({ merchant: 'Bembos' }),
+        expect.objectContaining({ paymentMethodId: 'method-ohpay' }),
+      )
+    })
+
+    it('should delete a rule from its 🗑️ button and show what is left', async () => {
+      mockBotTools.removeRule.mockResolvedValue({ reply: { text: 'quedan', edit: true }, notice: 'Regla borrada' })
+
+      const result = await service.handle(action(BotAction.RULE_DELETE))
+
+      expect(mockBotTools.removeRule).toHaveBeenCalledWith(FILE_ID)
+      expect(result).toEqual({ replies: [{ text: 'quedan', edit: true }], notice: 'Regla borrada' })
+    })
+
+    it('should send the file of the 📥 buttons of /exportar, and say so when the button is not valid', async () => {
+      mockBotTools.exportFile.mockResolvedValueOnce({ text: '📎 gastos.xlsx' }).mockResolvedValueOnce(null)
+
+      const sent = await service.handle(action(BotAction.EXPORT))
+      const invalid = await service.handle(action(BotAction.EXPORT))
+
+      expect(sent.replies[0].text).toBe('📎 gastos.xlsx')
+      expect(invalid).toEqual({ replies: [], notice: 'Este gasto ya fue procesado' })
+    })
+
+    it('should run the command of a key of the fixed keyboard', async () => {
+      mockBotTools.handleCommand.mockResolvedValueOnce([{ text: '⚡ Rápido' }])
+
+      const { replies } = await service.handle({
+        ...command(BotCommand.START),
+        type: ChannelMessageType.TEXT,
+        text: '⚡ Rápido',
+      })
+
+      expect(mockBotTools.handleCommand).toHaveBeenCalledWith(expect.objectContaining({ command: 'rapido' }))
+      expect(replies[0].text).toBe('⚡ Rápido')
+    })
+  })
+
   describe('commands', () => {
-    it('should show the help for /start and unknown commands', async () => {
-      const [start] = (await service.handle(command(BotCommand.START))).replies
+    it('should hand the groups of the menu and their commands over to the tools, and show the help for unknown ones', async () => {
+      mockBotTools.handleCommand.mockResolvedValueOnce([{ text: '📊 Consultar' }])
+
+      const { replies } = await service.handle(command(BotCommand.QUERY))
       const [unknown] = (await service.handle({ ...command(BotCommand.START), command: 'foo' })).replies
 
-      expect(start.text).toContain('Escríbeme tus gastos')
-      expect(unknown.text).toBe(start.text)
+      expect(mockBotTools.handleCommand).toHaveBeenCalledWith(expect.objectContaining({ command: 'consultar' }))
+      expect(replies[0].text).toBe('📊 Consultar')
+      expect(unknown.text).toContain('Escríbeme tus gastos')
+      expect(mockBotTools.clearAwaiting).toHaveBeenCalledWith(CHAT_ID)
+    })
+
+    it('should take the text of a command that was waiting for it (a button of a group) as its argument', async () => {
+      mockBotTools.takeAwaiting.mockReturnValueOnce(BotCommand.SEARCH)
+      mockExpenseDraftDB.searchSaved.mockResolvedValue([])
+
+      const { replies } = await service.handle({
+        ...command(BotCommand.START),
+        type: ChannelMessageType.TEXT,
+        text: 'netflix',
+      })
+
+      expect(mockExpenseDraftDB.searchSaved).toHaveBeenCalled()
+      expect(replies[0].text).toContain('No encontré gastos guardados con «netflix»')
+    })
+
+    it('should ask what to search when /buscar or /editar comes without text, and wait for it', async () => {
+      const { replies } = await service.handle({ ...command(BotCommand.SEARCH), text: '/buscar' })
+
+      expect(replies[0].text).toContain('Dime qué gasto buscar')
+      expect(mockBotTools.await).toHaveBeenCalledWith(CHAT_ID, BotCommand.SEARCH)
     })
 
     it('should discard the open draft with /cancelar', async () => {
@@ -864,6 +1000,17 @@ describe('ConversationService', () => {
 
       expect(mockExpenseDB.findMonthlyTotals).toHaveBeenCalledWith(expect.any(Number), expect.any(Number))
       expect(replies[0].text).toBe('No hay gastos registrados este mes.')
+    })
+
+    it('should total any month with /resumen agosto 2026, and explain the format when it is not one', async () => {
+      mockExpenseDB.findMonthlyTotals.mockResolvedValue([])
+
+      await service.handle({ ...command(BotCommand.SUMMARY), text: '/resumen agosto 2026' })
+      const { replies } = await service.handle({ ...command(BotCommand.SUMMARY), text: '/resumen hola' })
+
+      expect(mockExpenseDB.findMonthlyTotals).toHaveBeenCalledWith(8, 2026)
+      expect(mockExpenseDB.findMonthlyTotals).toHaveBeenCalledTimes(1)
+      expect(replies[0].text).toContain('/resumen agosto')
     })
   })
 
@@ -1843,7 +1990,7 @@ describe('ConversationService', () => {
     })
 
     it('should explain how to search and say when nothing matches', async () => {
-      expect((await service.handle(command(BotCommand.EDIT))).replies[0].text).toContain('/editar netflix')
+      expect((await service.handle(command(BotCommand.EDIT))).replies[0].text).toContain('netflix')
 
       mockExpenseDraftDB.searchSaved.mockResolvedValue([])
       const { replies } = await service.handle({ ...command(BotCommand.EDIT), text: '/editar pizza' })

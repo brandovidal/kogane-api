@@ -21,7 +21,8 @@ const getRoutePath = (req: IncomingMessage): string | undefined => {
 
 const isDev = (process.env.NODE_ENV ?? 'dev') === 'dev'
 
-const logLevel = (process.env.LOG_LEVEL ?? (isDev ? 'debug' : 'info')) as Level
+const configuredLogLevel = process.env.LOG_LEVEL?.trim()
+const logLevel = (configuredLogLevel || (isDev ? 'debug' : 'info')) as Level
 
 const customLogLevel = (_req: IncomingMessage, res: { statusCode: number }, err?: Error): LevelWithSilent => {
   if (err || res.statusCode >= 500) return 'error'

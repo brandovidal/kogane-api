@@ -237,6 +237,55 @@ export class ExpenseDraftDBRepository {
     return this.serializer.toDto(expenseDraft)
   }
 
+  // /rapido (P18): what was saved since a date, from any chat, newest first
+  async findSavedSince(since: Date, limit: number): Promise<ExpenseDraftDbDto[]> {
+    const expenseDrafts = await this.prisma.expenseDraft.findMany({
+      where: { status: ExpenseDraftStatus.SAVED, confirmedAt: { gte: since } },
+      orderBy: { confirmedAt: 'desc' },
+      take: limit,
+    })
+    return expenseDrafts.map((expenseDraft) => this.serializer.toDto(expenseDraft))
+  }
+
+  // /rapido: a new draft with the fields of a saved expense, in this chat and dated `spentAt`; it is saved right away
+  async createQuickCopy(
+    original: ExpenseDraftDbDto,
+    target: { channel: ExpenseDraftChannel; chatId: string; messageId: string },
+    spentAt: Date,
+  ): Promise<ExpenseDraftDbDto> {
+    const {
+      id: _id,
+      channel: _channel,
+      chatId: _chatId,
+      messageId: _messageId,
+      itemIndex: _itemIndex,
+      status: _status,
+      pendingField: _pendingField,
+      confirmedAt: _confirmedAt,
+      createdAt: _createdAt,
+      updatedAt: _updatedAt,
+      batchId: _batchId,
+      shareMessageId: _shareMessageId,
+      fileId: _fileId,
+      mediaFileId: _mediaFileId,
+      mediaUniqueId: _mediaUniqueId,
+      operationNumber: _operationNumber,
+      replacesDraftId: _replacesDraftId,
+      ...fields
+    } = original
+    const expenseDraft = await this.prisma.expenseDraft.create({
+      data: {
+        ...this.serializer.toUpdateData({ ...fields, spentAt }),
+        channel: target.channel,
+        chatId: target.chatId,
+        messageId: target.messageId,
+        inputType: original.inputType,
+        status: ExpenseDraftStatus.DRAFT,
+      } as Prisma.ExpenseDraftUncheckedCreateInput,
+    })
+    return this.serializer.toDto(expenseDraft)
+  }
+
   // /ultimos
   async findRecentSaved(channel: ExpenseDraftChannel, chatId: string, limit: number): Promise<ExpenseDraftDbDto[]> {
     const expenseDrafts = await this.prisma.expenseDraft.findMany({

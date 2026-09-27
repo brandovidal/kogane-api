@@ -329,6 +329,8 @@ model DailyExpense {
   merchant        String?
   operationNumber String?
   notes           String?
+  tripId          String? // the trip that was open when it was saved (/viaje, P18, D128)
+  trip            Trip?         @relation(fields: [tripId], references: [id], onDelete: SetNull)
   draftId         String?       @unique
   draft           ExpenseDraft? @relation(fields: [draftId], references: [id])
   createdAt       DateTime      @default(now())
@@ -337,6 +339,7 @@ model DailyExpense {
   @@index([spentAt])
   @@index([personId])
   @@index([categoryId])
+  @@index([tripId])
   @@index([userId])
   @@map("exp_daily_expenses")
 }
@@ -459,6 +462,39 @@ model Attachment {
   @@map("exp_attachments")
 }
 
+// A trip (P18, D128): /viaje <name> tags every day-to-day and card expense saved until /fin. One open at a time
+model Trip {
+  id        String    @id @default(cuid())
+  userId    String? // whose row it is (P23, D82): set and filtered by the tenancy extension
+  name      String
+  startedAt DateTime  @default(now())
+  endedAt   DateTime?
+  createdAt DateTime  @default(now())
+
+  dailyExpenses      DailyExpense[]
+  creditCardExpenses CreditCardExpense[]
+
+  @@index([userId])
+  @@index([endedAt])
+  @@map("exp_trips")
+}
+
+// What the bot learns (P18, D129): the category / payment method the user chose for a merchant or concept. It fills
+// them in the next expense that says the same. No foreign keys: a rule whose category or card was deleted is ignored
+model MerchantRule {
+  id              String   @id @default(cuid())
+  userId          String? // whose row it is (P23, D82): set and filtered by the tenancy extension
+  merchant        String // normalized key of the merchant (or, without one, of the description)
+  categoryId      String?
+  paymentMethodId String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([userId, merchant])
+  @@index([userId])
+  @@map("cat_merchant_rules")
+}
+
 model Subscription {
   id              String         @id @default(cuid())
   userId          String? // whose row it is (P23, D82): set and filtered by the tenancy extension
@@ -521,6 +557,8 @@ model CreditCardExpense {
   processDate     DateTime?
   notes           String?
   originDraftId   String? // the draft that also created this row (installments after the first, D73)
+  tripId          String? // the trip that was open when it was saved (/viaje, P18, D128)
+  trip            Trip?         @relation(fields: [tripId], references: [id], onDelete: SetNull)
   draftId         String?       @unique
   importKey       String?       @unique // fingerprint of the Notion row it was imported from (P14, D90)
   draft           ExpenseDraft? @relation(fields: [draftId], references: [id])
@@ -531,6 +569,7 @@ model CreditCardExpense {
   @@index([personId])
   @@index([originDraftId])
   @@index([paymentStatus])
+  @@index([tripId])
   @@index([userId])
   @@map("exp_credit_card_expenses")
 }

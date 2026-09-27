@@ -39,7 +39,23 @@ export enum BotAction {
   NOTIFY = 'ntf',
   // /avisos: "ntfs:<NotificationKind>" turns that kind on or off in Telegram
   NOTIFY_SETTING = 'ntfs',
+  // Tools of the menu groups (P18, D128): "qk:<key>" saves a quick expense · "und:<draftId>" confirms /deshacer ·
+  // "unx:<draftId>" keeps it · "rul:<ruleId>" forgets a learned rule · "exp:<format>-<yyyy-mm>" sends the month
+  QUICK = 'qk',
+  UNDO = 'und',
+  UNDO_CANCEL = 'unx',
+  RULE_DELETE = 'rul',
+  EXPORT = 'exp',
 }
+
+// Buttons of the tools (P18): handled by BotToolsService
+export const TOOL_ACTIONS: string[] = [
+  BotAction.QUICK,
+  BotAction.UNDO,
+  BotAction.UNDO_CANCEL,
+  BotAction.RULE_DELETE,
+  BotAction.EXPORT,
+]
 
 export const NOTIFICATION_ACTIONS: string[] = [BotAction.NOTIFY, BotAction.NOTIFY_SETTING]
 
@@ -68,7 +84,47 @@ export enum BotCommand {
   ALERTS = 'avisos', // /avisos: which reminders reach Telegram (P20)
   CALENDAR = 'calendario', // /calendario: what is due in the next 14 days (P20)
   INSTALLMENTS = 'cuotas', // /cuotas: card installments of the next 3 months (P20)
+  // The groups of the Telegram menu (P18, D128): each opens buttons with the commands below
+  REGISTER = 'registrar',
+  QUERY = 'consultar',
+  PAYMENTS = 'pagos',
+  SETTINGS = 'ajustes',
+  // Inside the groups: they work typed too, but the menu does not list them
+  TODAY = 'hoy',
+  WEEK = 'semana',
+  CARDS = 'tarjetas', // total of the current cycle of each card, with its closing and payment days
+  SEARCH = 'buscar', // /buscar <text>: saved expenses by concept, merchant or person
+  EXPORT = 'exportar', // /exportar [mes] [año]: Excel or PDF of the month
+  CHART = 'grafico', // /grafico [mes] [año]: donut by category
+  ASK = 'pregunta', // /pregunta <text>: the only command that uses the AI (one predefined query)
+  QUICK = 'rapido', // your 6 most repeated expenses, one tap
+  TRIP = 'viaje', // /viaje <name>: tags every expense until /fin
+  TRIP_END = 'fin',
+  UNDO = 'deshacer', // cancels the last saved expense
+  KEYBOARD = 'teclado', // shows or hides the fixed keyboard
+  RULES = 'reglas', // what the bot learned from your corrections
+  RECONCILE = 'cuadre', // /cuadre <tarjeta>: the last statement against what you registered
+  WEB = 'web', // links to kogane-app
 }
+
+// The fixed keyboard under the chat (/teclado): the text of each key arrives as a message and runs its command
+export const KEYBOARD_COMMANDS: Record<string, BotCommand> = {
+  '⚡ Rápido': BotCommand.QUICK,
+  '📝 Borrador': BotCommand.DRAFTS,
+  '📊 Consultar': BotCommand.QUERY,
+}
+
+// What Telegram's menu shows: seven groups instead of every command (P18, D128). The rest keep working typed and sit
+// behind the buttons of each group
+export const BOT_MENU_COMMANDS: BotCommand[] = [
+  BotCommand.REGISTER,
+  BotCommand.DRAFTS,
+  BotCommand.QUERY,
+  BotCommand.DEBTS,
+  BotCommand.PAYMENTS,
+  BotCommand.SETTINGS,
+  BotCommand.HELP,
+]
 
 // Descriptions shown in the Telegram command menu (Spanish: user-facing)
 export const BOT_COMMAND_DESCRIPTIONS: Record<BotCommand, string> = {
@@ -87,6 +143,25 @@ export const BOT_COMMAND_DESCRIPTIONS: Record<BotCommand, string> = {
   [BotCommand.ALERTS]: 'Qué avisos te llegan por Telegram',
   [BotCommand.CALENDAR]: 'Pagos de los próximos 14 días',
   [BotCommand.INSTALLMENTS]: 'Cuotas de tarjeta de los próximos meses',
+  [BotCommand.REGISTER]: 'Registrar: rápido, viaje, deshacer, editar',
+  [BotCommand.QUERY]: 'Consultar: hoy, semana, mes, tarjetas, gráfico…',
+  [BotCommand.PAYMENTS]: 'Pagos: avisos, calendario, cuotas y cuadre',
+  [BotCommand.SETTINGS]: 'Ajustes: reglas, teclado, uso de la AI y web',
+  [BotCommand.TODAY]: 'Gastos de hoy',
+  [BotCommand.WEEK]: 'Gastos de los últimos 7 días',
+  [BotCommand.CARDS]: 'Total del ciclo de cada tarjeta',
+  [BotCommand.SEARCH]: 'Buscar un gasto guardado',
+  [BotCommand.EXPORT]: 'Excel o PDF del mes',
+  [BotCommand.CHART]: 'Gráfico de gastos por categoría',
+  [BotCommand.ASK]: 'Preguntar sobre tus gastos',
+  [BotCommand.QUICK]: 'Tus gastos más repetidos, un toque',
+  [BotCommand.TRIP]: 'Etiquetar los gastos de un viaje',
+  [BotCommand.TRIP_END]: 'Cerrar el viaje y ver el total',
+  [BotCommand.UNDO]: 'Anular el último gasto guardado',
+  [BotCommand.KEYBOARD]: 'Mostrar u ocultar el teclado fijo',
+  [BotCommand.RULES]: 'Reglas que aprendí de tus correcciones',
+  [BotCommand.RECONCILE]: 'Cuadrar una tarjeta con su estado de cuenta',
+  [BotCommand.WEB]: 'Abrir Kogane en la web',
 }
 
 export const CALLBACK_SEPARATOR = ':'

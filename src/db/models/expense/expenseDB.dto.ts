@@ -50,6 +50,7 @@ export interface ChargeDbDto {
   currency: string
   amountInPen: number | null
   paymentMethodId: string | null
+  categoryId: string | null
   personId: string
   date: Date // spent day, or the processed day of a card expense (the day it was registered when unknown)
   createdAt: Date

@@ -9,6 +9,7 @@ export enum AiOperation {
   TRANSCRIBE = 'transcribe',
   RECOGNIZE = 'recognize', // local OCR + templates (D63)
   STATEMENT = 'statement', // the text of a bank statement (P14, D95)
+  QUESTION = 'question', // /pregunta: one predefined query picked for a question (P18, D131)
 }
 
 export const OCR_MODEL = 'tesseract'

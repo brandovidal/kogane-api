@@ -59,20 +59,6 @@ const PERIOD_LABELS: Record<SubscriptionPeriod, string> = {
 }
 
 export const TEXTS = {
-  help: [
-    '👋 Escríbeme tus gastos y los registro.',
-    '',
-    '<b>Ejemplos</b>',
-    '• almuerzo 25 soles con yape',
-    '• uber 18.50 ayer en efectivo',
-    '• netflix 45 mensual con la oh',
-    '• zapatillas 300 con io en 3 cuotas',
-    '• le presté 100 a dany',
-    '• 📸 una captura de Yape o Plin, o la foto de un voucher (con texto opcional: <i>persona dany</i>)',
-    '• 🎙️ una nota de voz: <i>"almuerzo veinticinco soles con yape"</i>',
-    '',
-    '<b>Para corregir</b> un gasto que acabo de leer, empieza con la palabra: <i>monto 30</i>, <i>persona dany</i>, <i>cuota 2/6</i>, <i>tarjeta oh</i>, <i>categoría comida</i>, <i>con culpa</i>, <i>ayer</i>. Si no, toca ✏️ Corregir y escríbelo como quieras.',
-  ].join('\n'),
   failed: '⚠️ No pude procesar el mensaje ahora. Lo dejé en /borrador para reintentarlo.',
   interrupted: (count: number) =>
     count === 1
@@ -100,7 +86,8 @@ export const TEXTS = {
     `${escapeHtml(name)} no puede deber más que el total (${total}). Escribe un monto, un porcentaje (<i>30%</i>) o <i>la mitad</i>.`,
   shareNotUnderstood:
     'No entendí la parte. Escribe un monto (<i>20</i>), un porcentaje (<i>30%</i>) o <i>la mitad</i>.',
-  editUsage: '✏️ Dime qué gasto buscar: <i>/editar netflix</i>, <i>/editar dany 64</i> o <i>/editar io 22/09</i>.',
+  editUsage:
+    '🔎 Dime qué gasto buscar: el concepto, la persona, el monto o la fecha. Por ejemplo <i>netflix</i>, <i>dany 64</i> o <i>io 22/09</i>.',
   editCancelled: '❌ <b>Edición cancelada</b>. El gasto quedó como estaba.',
   editLocked: '🔒 Ese gasto tiene deudas con abonos: edita la deuda en la web (Préstamos y deudas).',
   unreadable: (names: string[]) =>
@@ -166,7 +153,7 @@ export function formatAmount(amount: number | null, currency: string | null): st
 
 const formatDate = (date: Date | null) => (date ? date.toISOString().slice(0, 10).split('-').reverse().join('/') : '—')
 
-const nameOf = (catalog: ExtractionCatalog, id: string | null) =>
+export const nameOf = (catalog: ExtractionCatalog, id: string | null) =>
   escapeHtml(findCatalogEntryById(catalog, id)?.name ?? '—')
 
 export function formatSummary(expenseDraft: ExpenseDraftDbDto, catalog: ExtractionCatalog): string {
@@ -212,26 +199,35 @@ const COMMAND_BUTTON_LABELS: Partial<Record<BotCommand, string>> = {
   [BotCommand.CALENDAR]: '📅 Calendario',
   [BotCommand.INSTALLMENTS]: '💳 Cuotas',
   [BotCommand.ALERTS]: '🔔 Avisos',
+  [BotCommand.REGISTER]: '✍️ Registrar',
+  [BotCommand.QUERY]: '📊 Consultar',
+  [BotCommand.PAYMENTS]: '📅 Pagos',
+  [BotCommand.SETTINGS]: '⚙️ Ajustes',
+  [BotCommand.DEBTS]: '💸 Deudas',
+  [BotCommand.TODAY]: '📅 Hoy',
+  [BotCommand.WEEK]: '🗓️ Semana',
+  [BotCommand.CARDS]: '💳 Tarjetas',
+  [BotCommand.FORECAST]: '🔮 Pronóstico',
+  [BotCommand.SEARCH]: '🔎 Buscar',
+  [BotCommand.EXPORT]: '📥 Exportar',
+  [BotCommand.CHART]: '📈 Gráfico',
+  [BotCommand.ASK]: '❓ Pregunta',
+  [BotCommand.QUICK]: '⚡ Rápido',
+  [BotCommand.TRIP]: '✈️ Viaje',
+  [BotCommand.TRIP_END]: '🏁 Cerrar viaje',
+  [BotCommand.UNDO]: '↩️ Deshacer',
+  [BotCommand.KEYBOARD]: '⌨️ Teclado',
+  [BotCommand.RULES]: '🧠 Reglas',
+  [BotCommand.RECONCILE]: '✅ Cuadre',
+  [BotCommand.EDIT]: '✏️ Editar',
+  [BotCommand.COLLECT]: '💬 Cobrar',
 }
 
-const commandButton = (command: BotCommand) =>
+export const commandButton = (command: BotCommand) =>
   button(COMMAND_BUTTON_LABELS[command] ?? `/${command}`, BotAction.COMMAND, command)
 
 // One row of buttons that run commands (cmd:<command>)
 export const commandButtons = (...commands: BotCommand[]): BotButton[][] => [commands.map(commandButton)]
-
-// Help (/start, /ayuda): the everyday commands as buttons, two per row
-export function buildHelpReply(): BotReply {
-  const commands = [BotCommand.DRAFTS, BotCommand.RECENT, BotCommand.SUMMARY, BotCommand.USAGE, BotCommand.CANCEL]
-  return {
-    text: TEXTS.help,
-    buttons: commands.reduce<BotButton[][]>((rows, command, index) => {
-      if (index % 2 === 0) rows.push([])
-      rows[rows.length - 1].push(commandButton(command))
-      return rows
-    }, []),
-  }
-}
 
 // Commands a reply mentions that get a button (/deudas and /cobrar need a name, so they stay as text)
 const LINKED_COMMANDS = [BotCommand.DRAFTS, BotCommand.RECENT, BotCommand.SUMMARY]
@@ -497,7 +493,7 @@ export function buildParkedNotice(expenseDraft: ExpenseDraftDbDto): BotReply {
   return { text: `📝 Quedó en /borrador: ${conceptOf(expenseDraft)}. Retómalo cuando quieras.` }
 }
 
-const conceptOf = ({ description, amount, currency }: ExpenseDraftDbDto) =>
+export const conceptOf = ({ description, amount, currency }: ExpenseDraftDbDto) =>
   `${escapeHtml(description ?? 'Gasto')} ${formatAmount(amount, currency)}`
 
 // Several screenshots or movements at once (P21): one list instead of one summary per expense
