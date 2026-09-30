@@ -13,6 +13,17 @@ export const uploadStatementSchema = z.object({
   savePassword: z.stringbool().optional(),
 })
 
+const updateStatementBalanceSchema = z
+  .object({
+    currency: z.enum(Currency),
+    totalDue: z.number().nullable().optional(),
+    minimumDue: z.number().nullable().optional(),
+    previousBalance: z.number().nullable().optional(),
+    previousPayments: z.number().nullable().optional(),
+    monthlyPayment: z.number().nullable().optional(),
+  })
+  .refine((balance) => Object.keys(balance).some((key) => key !== 'currency'))
+
 export const updateStatementSchema = z
   .object({
     personId: z.string().min(1).optional(),
@@ -21,13 +32,19 @@ export const updateStatementSchema = z
     currency: z.enum(Currency).optional(),
     minimumDue: z.number().nonnegative().nullable().optional(),
     minimumAllocations: z.record(z.string(), z.number().nonnegative()).nullable().optional(),
+    balances: z
+      .array(updateStatementBalanceSchema)
+      .min(1)
+      .refine((balances) => new Set(balances.map((balance) => balance.currency)).size === balances.length)
+      .optional(),
   })
   .refine(
     (value) =>
       value.personId !== undefined ||
       value.paymentMethodId !== undefined ||
       value.minimumDue !== undefined ||
-      value.minimumAllocations !== undefined,
+      value.minimumAllocations !== undefined ||
+      value.balances !== undefined,
   )
 
 // Selección múltiple (D116): the person of several purchases at once; null goes back to the statement's

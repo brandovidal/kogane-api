@@ -1,4 +1,5 @@
 import { statementBalances, emptyStatementBalance } from './statement.balance'
+import type { StatementBalanceUpdate } from './statement.balance'
 import { Injectable, Logger } from '@nestjs/common'
 
 import { AiOperation } from '@/commons/constants/ai.constant'
@@ -69,14 +70,13 @@ function paymentSummaryOf(
   }
 }
 
-const rowKey = (row: {
+const rowIdentity = (row: {
   date: string | null
   description: string
   amount: number
-  currency: string
   installment?: string | null
 }) =>
-  `${row.currency}|${row.installment ?? ''}|${row.date ?? ''}|${toCents(row.amount)}|${row.description
+  `${row.installment ?? ''}|${row.date ?? ''}|${toCents(row.amount)}|${row.description
     .normalize('NFD')
     .replace(/\p{Diacritic}/gu, '')
     .toLowerCase()
@@ -315,12 +315,14 @@ export class StatementsService {
       minimumDue,
       minimumAllocations,
       currency,
+      balances,
     }: {
       personId?: string
       paymentMethodId?: string
       currency?: string
       minimumDue?: number | null
       minimumAllocations?: Record<string, number> | null
+      balances?: StatementBalanceUpdate[]
     },
   ) {
     if (personId) {
@@ -338,6 +340,9 @@ export class StatementsService {
     }
     if (minimumAllocations !== undefined) {
       await this.statementDBRepository.updateMinimumAllocations(id, minimumAllocations, currency)
+    }
+    if (balances !== undefined) {
+      await this.statementDBRepository.updateBalances(id, balances)
     }
     return this.get(id)
   }
@@ -395,10 +400,6 @@ export class StatementsService {
       // a purchase description, e.g. "Falabella.com" on a card that is not CMR)
       const aiParsed = fromAi(output, detectCardHint(output.cardName ?? '') ?? parsed.cardHint)
       const fromAiRows = aiParsed.rows
-      const seen = new Set(fromAiRows.map(rowKey))
-      const itemizedCharges = parsed.rows.filter(
-        (row) => ITEMIZED_CARD_CHARGE.test(row.description) && !seen.has(rowKey(row)),
-      )
       // The AI owns the currency interpretation when the template could not reconcile the PDF.
       // Never overwrite a USD total with the last amount of a dual-column template line.
       const multiCurrency =
@@ -418,16 +419,26 @@ export class StatementsService {
       ) {
         throw new StatementUnreadableException({ reason: 'currency balances not identified' })
       }
-      const supplements = parsed.currencyAmbiguous || multiCurrency ? [] : itemizedCharges
-      const parsedAnulations = parsed.currencyAmbiguous || multiCurrency ? [] : parsed.rows.filter((row) => row.locked)
-      // Preserve repeated purchases in the PDF, including equal amounts in different currencies.
-      const extras = [...supplements, ...parsedAnulations].filter((row) => {
-        const key = rowKey(row)
-        if (seen.has(key)) return false
-        seen.add(key)
-        return true
+      // The PDF reader can identify individual rows by their printed currency column even when a partial parse does
+      // not add up to the bank total. Keep those reliable rows alongside AI output so a long statement cannot lose
+      // movements merely because the AI response was incomplete. Match as a multiset to retain legitimate repeats.
+      const aiRows = [...fromAiRows]
+      const consumedAiRows = new Set<number>()
+      const extras = parsed.rows.filter((row) => row.date && row.currencyCertain).filter((row) => {
+        const duplicateIndex = aiRows.findIndex(
+          (candidate, index) =>
+            !consumedAiRows.has(index) &&
+            rowIdentity(candidate) === rowIdentity(row),
+        )
+        if (duplicateIndex < 0) return true
+        consumedAiRows.add(duplicateIndex)
+        // An explicit PDF column/symbol is the source of truth if AI assigned the same movement to the other currency.
+        if (aiRows[duplicateIndex].currency !== row.currency) {
+          aiRows[duplicateIndex] = { ...aiRows[duplicateIndex], currency: row.currency }
+        }
+        return false
       })
-      const uniqueRows = [...fromAiRows, ...extras]
+      const uniqueRows = [...aiRows, ...extras]
       return { parsed: { ...aiParsed, rows: lockCancelledStatementRows(uniqueRows) }, source: StatementSource.AI }
     }
     if (parsed.rows.length && !parsed.currencyAmbiguous) return { parsed, source: StatementSource.TEMPLATE }

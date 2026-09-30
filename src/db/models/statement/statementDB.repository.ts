@@ -1,4 +1,4 @@
-import { StatementBalanceData } from '@/modules/statements/statement.balance'
+import { StatementBalanceData, StatementBalanceUpdate } from '@/modules/statements/statement.balance'
 import { Injectable } from '@nestjs/common'
 import { Statement, StatementBalance } from '@/generated/prisma/client'
 
@@ -182,6 +182,32 @@ export class StatementDBRepository {
 
   async updateMinimumDue(id: string, minimumDue: number | null, currency?: string) {
     return this.updateBalance(id, { minimumDue }, currency)
+  }
+
+  async updateBalances(id: string, balances: StatementBalanceUpdate[]) {
+    await this.prisma.$transaction(async (tx) => {
+      const statement = await tx.statement.findUniqueOrThrow({ where: { id } })
+      for (const balance of balances) {
+        const data = {
+          totalDue: balance.totalDue,
+          minimumDue: balance.minimumDue,
+          previousBalance: balance.previousBalance,
+          previousPayments: balance.previousPayments,
+          monthlyPayment: balance.monthlyPayment,
+        }
+        await tx.statementBalance.upsert({
+          where: {
+            statementId_currency: { statementId: id, currency: balance.currency },
+          },
+          create: { statementId: id, currency: balance.currency, ...data },
+          update: data,
+        })
+        if (balance.currency === statement.currency) {
+          await tx.statement.update({ where: { id }, data })
+        }
+      }
+    })
+    return this.findById(id)
   }
 
   async updateMinimumAllocations(id: string, allocations: Record<string, number> | null, currency?: string) {

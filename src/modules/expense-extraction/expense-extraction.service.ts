@@ -129,7 +129,17 @@ export class ExpenseExtractionService {
     const { timeoutMs } = this.configService.getOrThrow<AiConfig>('ai')
     const parts: AiInputPart[] = [{ type: AiInputPartType.TEXT, text }]
 
-    for (const candidate of this.buildRoute(false)) {
+    // A statement lists dozens of movements, far over the ~900 output tokens Groq allows per answer (it would cut the
+    // list short and drop movements silently): Gemini answers first, Groq is the last resort
+    const route = this.buildRoute(false)
+    const candidates =
+      operation === AiOperation.STATEMENT
+        ? [
+            ...route.filter((c) => c.provider === AiProvider.GEMINI),
+            ...route.filter((c) => c.provider !== AiProvider.GEMINI),
+          ]
+        : route
+    for (const candidate of candidates) {
       if (await this.isOverQuota(candidate)) continue
       const provider = this.aiExtractorProviderStrategy.getProvider(candidate.provider)
       const startedAt = Date.now()

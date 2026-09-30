@@ -42,7 +42,34 @@ function twoColumnPdf(): Promise<Buffer> {
   })
 }
 
+// IO's Consumos en cuotas: a long merchant name wraps above and below its row, which is centred on them
+function wrappedNamesPdf(): Promise<Buffer> {
+  return new Promise((resolve) => {
+    const doc = new PDFDocument()
+    const chunks: Buffer[] = []
+    doc.on('data', (chunk: Buffer) => chunks.push(chunk))
+    doc.on('end', () => resolve(Buffer.concat(chunks)))
+    doc.fontSize(10)
+    doc.text('22-JUN', 50, 80)
+    doc.text('FALABELLACOM', 120, 80)
+    doc.text('795.23', 400, 80)
+    doc.text('PAGO DE', 120, 100)
+    doc.text('20-AGO', 50, 106)
+    doc.text('381.70', 400, 106)
+    doc.text('SUNAT', 120, 112)
+    doc.text('31-JUL', 50, 140)
+    doc.text('OSTEO PERU', 120, 140)
+    doc.text('141.14', 400, 140)
+    doc.end()
+  })
+}
+
 describe('readPdfLines', () => {
+  it('should join a merchant name wrapped around its row into that row', async () => {
+    const lines = await readPdfLines(await wrappedNamesPdf(), null)
+    expect(lines).toEqual(['22-JUN FALABELLACOM 795.23', '20-AGO PAGO DE SUNAT 381.70', '31-JUL OSTEO PERU 141.14'])
+  })
+
   it('should open a protected PDF with the document number and join each printed line', async () => {
     const lines = await readPdfLines(await protectedPdf('44556677'), '44556677')
     expect(lines).toEqual(['ESTADO DE CUENTA SIP', '15/08 MP*MERCADOLI 1/3 164.90'])

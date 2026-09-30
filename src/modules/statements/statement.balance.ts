@@ -9,6 +9,9 @@ export interface StatementBalanceData {
   monthlyPayment: number | null
 }
 
+// An edit only carries the amounts that changed; the rest stays as saved
+export type StatementBalanceUpdate = Partial<StatementBalanceData> & Pick<StatementBalanceData, 'currency'>
+
 export const emptyStatementBalance = (currency: string): StatementBalanceData => ({
   currency,
   totalDue: null,

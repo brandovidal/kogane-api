@@ -15,6 +15,7 @@ export interface ParsedStatementRow {
   currency: string
   installment: string | null
   locked?: boolean // cancelled purchase/refund pair kept for reference, never importable
+  currencyCertain?: boolean // the PDF gave this row an explicit symbol or section/column
 }
 
 export interface ParsedStatement {
@@ -59,11 +60,29 @@ const amountOf = (text: string) => toCents(Number(text.replace(/,/g, '')))
 
 // Lines that are totals, balances or payments, never a purchase
 const NOT_A_MOVEMENT =
-  /total|saldo|pago minimo|pago del mes|linea de credito|limite|tasa|tea|tcea|su pago|pago recibido|pago realizado|gracias por su pago|abono|pago-pago con ahorra mas/
+  /total|saldo|pago minimo|pago del mes|linea de credito|limite|\btasa\b|\btea\b|tcea|su pago|pago recibido|pago realizado|gracias por su pago|abono|pago-pago con ahorra mas/
 
 const paymentDescription =
   /\b(su pago|pagos? recibidos?|pagos? realizados?|gracias por su pago|abonos?|pago-pago con ahorra mas)\b/
 const cancellationDescription = /\b(anulacion|reversa|extorno)\b/i
+
+// "Resumen de movimientos": "+ INTERÉS COMPENSATORIO 380.84 US$ 0.00", one soles and one dólares amount per line
+const SUMMARY_ROW = new RegExp(`^([-+=]?)\\s*([a-z ]+?)\\s+(${AMOUNT})\\s+us\\s*\\$\\s*(${AMOUNT})$`)
+// IO's Consumos en cuotas: "date merchant total n de m capital interest TEA% [S/|US$] installment" (the installment
+// amount, interest included, is what the statement adds up)
+const INSTALLMENT_ROW = new RegExp(
+  `^(.*?)\\s+${AMOUNT}\\s+(\\d{1,2})\\s+de\\s+(\\d{1,2})\\s+${AMOUNT}\\s+${AMOUNT}\\s+\\d+(?:\\.\\d+)?%\\s*(s/|us\\$)?\\s*(${AMOUNT})$`,
+)
+const toChargeDescription = (label: string) => {
+  const text = label.trim()
+  return text.charAt(0).toUpperCase() + text.slice(1)
+}
+
+// The description from the original line keeps its capital letters
+function prettyOf(original: string, description: string): string {
+  const start = original.toLowerCase().indexOf(description.split(' ')[0] ?? '')
+  return start >= 0 ? original.slice(start, start + description.length).trim() : description
+}
 
 const merchantOf = (description: string) =>
   normalizeText(description)
@@ -182,8 +201,10 @@ export function parseStatementLines(lines: string[]): ParsedStatement {
     if (!balances.has(currency)) balances.set(currency, emptyStatementBalance(currency))
     return balances.get(currency)!
   }
+  const charges: { description: string; currency: string; amount: number }[] = []
   let sectionCurrency = parsed.currency
   let columns: string[] = []
+  let inPayments = false
   normalizedLines.forEach((line, index) => {
     const markers = currenciesIn(line)
     if (markers.length && !new RegExp(AMOUNT).test(line)) {
@@ -192,14 +213,47 @@ export function parseStatementLines(lines: string[]): ParsedStatement {
         columns = []
       } else columns = markers
     }
+    if (line === 'abonos') inPayments = true
+    else if (/^subtotal|^consumos (directos|en cuotas)/.test(line)) inPayments = false
     const withNext = `${line} ${normalizedLines[index + 1] ?? ''}`
     if (!parsed.dueDate && /(ultimo dia|fecha( limite)?) de pago|pagar hasta/.test(line))
-      parsed.dueDate = findDate(withNext)
+      // IO prints the date some lines below its heading, after the totals
+      parsed.dueDate =
+        findDate(withNext) ??
+        normalizedLines
+          .slice(index + 1, index + 6)
+          .map(findDate)
+          .find(Boolean) ??
+        null
     if (!parsed.periodEnd && /fecha de (cierre|corte)|cierre de facturacion/.test(line))
       parsed.periodEnd = findDate(withNext)
+    // "Ciclo de facturación: 26/07/2026 al 25/08/2026": the cycle closes on its last day
+    const cycle = /(\d{1,2}\/\d{1,2}\/\d{4}) (?:al|hasta el) (\d{1,2}\/\d{1,2}\/\d{4})/.exec(withNext)
+    if (!parsed.periodEnd && cycle) parsed.periodEnd = findDate(cycle[2])
+    const summary = SUMMARY_ROW.exec(line)
+    if (summary) {
+      const [, sign, label, soles, dollars] = summary
+      const values = [
+        { currency: Currency.PEN, amount: amountOf(soles) },
+        { currency: Currency.USD, amount: amountOf(dollars) },
+      ]
+      const summaryField = /saldo pendiente del mes anterior/.test(label)
+        ? 'previousBalance'
+        : /abonos del mes actual/.test(label)
+          ? 'previousPayments'
+          : /pago total del mes/.test(label)
+            ? 'totalDue'
+            : null
+      for (const entry of values) {
+        if (summaryField) balanceFor(entry.currency)[summaryField] = entry.amount
+        else if (sign === '+' && !/^consumos/.test(label) && entry.amount > 0)
+          charges.push({ description: toChargeDescription(label), currency: entry.currency, amount: entry.amount })
+      }
+      if (summaryField || sign === '+') return
+    }
     const field = /pago minimo/.test(line)
       ? 'minimumDue'
-      : /saldo mes anterior/.test(line)
+      : /saldo (pendiente del )?mes anterior/.test(line)
         ? 'previousBalance'
         : /pago del mes/.test(line)
           ? 'monthlyPayment'
@@ -210,7 +264,12 @@ export function parseStatementLines(lines: string[]): ParsedStatement {
       const amounts = currencyAmounts(new RegExp(AMOUNT).test(line) ? line : withNext, sectionCurrency, columns)
       if (!amounts) parsed.currencyAmbiguous = true
       for (const entry of amounts ?? []) balanceFor(entry.currency)[field] ??= entry.amount
-    } else if (paymentDescription.test(line) && !/total/.test(line) && !cancellationDescription.test(line)) {
+    } else if (
+      !inPayments &&
+      paymentDescription.test(line) &&
+      !/total/.test(line) &&
+      !cancellationDescription.test(line)
+    ) {
       const amounts = currencyAmounts(line, sectionCurrency, columns)
       if (!amounts) parsed.currencyAmbiguous = true
       for (const entry of amounts ?? []) {
@@ -231,9 +290,14 @@ export function parseStatementLines(lines: string[]): ParsedStatement {
   sectionCurrency = parsed.currency
   columns = []
   let hasExplicitSection = false
+  let inPaymentRows = false
   lines.forEach((original) => {
     const line = original.trim()
     const normalized = normalizeText(line)
+    // The payments and credits table (IO's "Abonos") holds no purchases; the summary already carries its total
+    if (normalized === 'abonos') inPaymentRows = true
+    else if (/^subtotal|^consumos (directos|en cuotas)/.test(normalized)) inPaymentRows = false
+    if (inPaymentRows) return
     const markers = currenciesIn(normalized)
     if (markers.length && !new RegExp(AMOUNT).test(normalized)) {
       hasExplicitSection = markers.length === 1
@@ -245,14 +309,34 @@ export function parseStatementLines(lines: string[]): ParsedStatement {
     if (NOT_A_MOVEMENT.test(normalized)) return
     const first = dateFrom(normalizeText(line), fallbackYear)
     if (!first) return
+    // A day printed without its year belongs to the year before when it would fall after the closing day (December
+    // purchases on a January statement)
+    if (parsed.periodEnd && !/\d{4}|\b\d{2}\s*$/.test(line.slice(0, 12)) && first.iso > parsed.periodEnd)
+      first.iso = `${Number(first.iso.slice(0, 4)) - 1}${first.iso.slice(4)}`
     // A second date (consumo and proceso) is skipped
     const second = dateFrom(first.rest, fallbackYear)
     const rest = (second ? second.rest : first.rest).trim()
+    const installmentRow = INSTALLMENT_ROW.exec(rest)
+    if (installmentRow) {
+      const [, merchant, current, total, marker, installmentAmount] = installmentRow
+      parsed.rows.push({
+        date: first.iso,
+        description: prettyOf(original, merchant.trim()),
+        amount: amountOf(installmentAmount),
+        currency: marker ? (marker.startsWith('us') ? Currency.USD : Currency.PEN) : sectionCurrency,
+        installment: `${Number(current)}/${Number(total)}`,
+        currencyCertain: true,
+      })
+      return
+    }
+    if (!new RegExp(AMOUNT).test(rest)) return // a date in a heading ("12 sep 26", the billing cycle), not a movement
     if (documentCurrencies.size > 1 && !hasExplicitSection && !currenciesIn(rest).length)
       parsed.currencyAmbiguous = true
     const rowAmounts = currencyAmounts(rest, sectionCurrency, columns)
     if (!rowAmounts || rowAmounts.length > 1) parsed.currencyAmbiguous = true
     const rowCurrency = rowAmounts?.length === 1 ? rowAmounts[0].currency : sectionCurrency
+    const currencyCertain =
+      rowAmounts?.length === 1 && (currenciesIn(rest).length > 0 || hasExplicitSection || documentCurrencies.size <= 1)
     const cancellation = cancellationDescription.test(rest)
     const separateCredit = new RegExp(`-\\s*(${AMOUNT})\\s*$`).exec(rest)
     const amountMatch = separateCredit ?? new RegExp(`(${AMOUNT})\\s*(-|cr)?$`).exec(rest)
@@ -272,9 +356,7 @@ export function parseStatementLines(lines: string[]): ParsedStatement {
       installmentText = `${Number(installment[1])}/${Number(installment[2])}`
       description = description.replace(installment[0], '').trim()
     }
-    // The description from the original line keeps its capital letters
-    const start = original.toLowerCase().indexOf(description.split(' ')[0] ?? '')
-    const pretty = start >= 0 ? original.slice(start, start + description.length).trim() : description
+    const pretty = prettyOf(original, description)
     if (!pretty) return
 
     parsed.rows.push({
@@ -283,9 +365,21 @@ export function parseStatementLines(lines: string[]): ParsedStatement {
       amount,
       currency: rowCurrency,
       installment: installmentText,
+      currencyCertain,
       ...(cancellation && separateCredit ? { locked: true } : {}),
     })
   })
+
+  // Interest, insurance and fees of the summary are charges of the statement that no purchase line carries
+  for (const charge of charges)
+    parsed.rows.push({
+      date: parsed.periodEnd,
+      description: charge.description,
+      amount: charge.amount,
+      currency: charge.currency,
+      installment: null,
+      currencyCertain: true,
+    })
 
   for (const balance of parsed.balances ?? []) {
     if (balance.previousBalance == null || balance.previousPayments == null) continue
