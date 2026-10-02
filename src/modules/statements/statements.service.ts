@@ -36,10 +36,10 @@ import { CardExpenseForMatch, reconcileStatement } from './statement.reconcile'
 
 export interface StatementUpload {
   data: Buffer
-  password?: string | null // when the saved document number does not open it
-  paymentMethodId?: string | null // when the text does not say which card
-  personId?: string | null // manual assignment takes precedence over the PDF hint
-  savePassword?: boolean // the typed password becomes the document number of the statement's person (D94)
+  password?: string | null
+  paymentMethodId?: string | null
+  personId?: string | null
+  savePassword?: boolean
 }
 
 const day = (isoDay: string | null) => (isoDay ? new Date(`${isoDay}T00:00:00.000Z`) : null)
@@ -52,9 +52,6 @@ const periodOfDay = (isoDay: string): PaymentPeriod => ({
 const ITEMIZED_CARD_CHARGE =
   /\b(seguro( de)? desgravamen|desgravamen|interes(es)?|comision(es)?|membresia|itf|mora|moratorio|penalidad)\b/i
 
-// "Resumen de movimientos y pagos del mes" the bank prints (saldo anterior, abonos, consumos con y sin cuotas,
-// intereses…): previousBalance/previousPayments/totalDue/minimumDue already come from the balance the PDF stated;
-// these three are computed from the rows already saved, so they never drift from what the statement detail shows
 function paymentSummaryOf(
   rows: { description: string; amount: number; currency: string; installment: string | null }[],
   currency: string,
@@ -70,12 +67,7 @@ function paymentSummaryOf(
   }
 }
 
-const rowIdentity = (row: {
-  date: string | null
-  description: string
-  amount: number
-  installment?: string | null
-}) =>
+const rowIdentity = (row: { date: string | null; description: string; amount: number; installment?: string | null }) =>
   `${row.installment ?? ''}|${row.date ?? ''}|${toCents(row.amount)}|${row.description
     .normalize('NFD')
     .replace(/\p{Diacritic}/gu, '')
@@ -83,8 +75,6 @@ const rowIdentity = (row: {
     .replace(/\s+/g, ' ')
     .trim()}`
 
-// Bank statements (P14 block 2, D95): the PDF is opened with a saved document number (D94), read by a template
-// or the AI (only its text), saved row by row and reconciled with the card expenses of its payment month
 @Injectable()
 export class StatementsService {
   private readonly logger = new Logger(StatementsService.name)
@@ -110,7 +100,6 @@ export class StatementsService {
     const opened = await this.openPdf(data, password, personId ?? null, owner, people)
     const { lines } = opened
     const { parsed, source } = await this.read(lines, opened.password)
-    // The chosen person, else the holder the PDF names, else whose document number opened it, else the owner
     const assignedPersonId =
       personId ?? inferHolder(people, lines, parsed.holderName)?.id ?? opened.personId ?? owner?.id
     if (!assignedPersonId) throw new StatementUnreadableException({ reason: 'no person to assign' })
@@ -125,11 +114,8 @@ export class StatementsService {
       this.cardExpenses(card.id, addMonths(period, -1)),
       this.cardHolderDBRepository.findByCard(card.id),
     ])
-    // Statement rows may include a purchase recorded against the previous payment month.
-    // Use both months to match, while statement detail still reports only current-month expenses as missing.
     const matchCandidates = [...currentExpenses, ...previousExpenses]
     const { rows } = reconcileStatement(parsed.rows, matchCandidates)
-    // Whose each purchase is: its section (CMR), its TIT/ADIC mark (Sip) or the titular (D116)
     const inferredPeople = assignRowPeople(rows, rowHolderHints(lines, rows), {
       titularId: assignedPersonId,
       holders,
@@ -175,7 +161,6 @@ export class StatementsService {
     return view
   }
 
-  // The statement with its rows, the card expenses of the month that are not in it, and both totals
   async get(id: string) {
     const statement = await this.statementDBRepository.findById(id)
     const period = { paymentMonth: statement.paymentMonth, paymentYear: statement.paymentYear }
@@ -210,7 +195,6 @@ export class StatementsService {
     return {
       ...statement,
       balances,
-      // Whose each purchase is: its expense's person once matched or created, else the one chosen, else the statement's
       rows: statement.rows.map((row) => ({
         ...row,
         personId: (row.expenseId && personOfExpense.get(row.expenseId)) || row.personId || statement.personId,
@@ -240,14 +224,11 @@ export class StatementsService {
     }))
   }
 
-  // ➕ Crear: the new rows (all or the given ones) become pending card expenses of the statement month
   async createNew(id: string, rowIds?: string[]) {
     const statement = await this.statementDBRepository.findById(id)
     const owner = await this.personDBRepository.findDefault()
     const statementPersonId = statement.personId ?? owner?.id
     if (!statementPersonId) throw new StatementUnreadableException({ reason: 'no person to assign' })
-    // "Crear todos" takes the new rows; a row chosen by hand is created anyway (matched with an expense of the same
-    // name from another month or card, or ignored), but never twice
     const rows = statement.rows.filter((row) =>
       rowIds?.length
         ? rowIds.includes(row.id) && row.result !== StatementRowResult.CREATED && !row.locked
@@ -267,7 +248,6 @@ export class StatementsService {
           paymentMonth: statement.paymentMonth,
           paymentYear: statement.paymentYear,
         }
-        // On a card the owner pays, another person's purchase is also what they owe (Cobros, D114, D116)
         const collect = personId !== owner?.id && statementPersonId === owner?.id
         return {
           id: row.id,
@@ -396,12 +376,8 @@ export class StatementsService {
       operation: AiOperation.STATEMENT,
     })
     if (output?.movements.length) {
-      // The card the AI read off the statement wins over the template's naive full-text scan (which can be fooled by
-      // a purchase description, e.g. "Falabella.com" on a card that is not CMR)
       const aiParsed = fromAi(output, detectCardHint(output.cardName ?? '') ?? parsed.cardHint)
       const fromAiRows = aiParsed.rows
-      // The AI owns the currency interpretation when the template could not reconcile the PDF.
-      // Never overwrite a USD total with the last amount of a dual-column template line.
       const multiCurrency =
         new Set([
           ...aiParsed.rows.map((row) => row.currency),
@@ -419,25 +395,21 @@ export class StatementsService {
       ) {
         throw new StatementUnreadableException({ reason: 'currency balances not identified' })
       }
-      // The PDF reader can identify individual rows by their printed currency column even when a partial parse does
-      // not add up to the bank total. Keep those reliable rows alongside AI output so a long statement cannot lose
-      // movements merely because the AI response was incomplete. Match as a multiset to retain legitimate repeats.
       const aiRows = [...fromAiRows]
       const consumedAiRows = new Set<number>()
-      const extras = parsed.rows.filter((row) => row.date && row.currencyCertain).filter((row) => {
-        const duplicateIndex = aiRows.findIndex(
-          (candidate, index) =>
-            !consumedAiRows.has(index) &&
-            rowIdentity(candidate) === rowIdentity(row),
-        )
-        if (duplicateIndex < 0) return true
-        consumedAiRows.add(duplicateIndex)
-        // An explicit PDF column/symbol is the source of truth if AI assigned the same movement to the other currency.
-        if (aiRows[duplicateIndex].currency !== row.currency) {
-          aiRows[duplicateIndex] = { ...aiRows[duplicateIndex], currency: row.currency }
-        }
-        return false
-      })
+      const extras = parsed.rows
+        .filter((row) => row.date && row.currencyCertain)
+        .filter((row) => {
+          const duplicateIndex = aiRows.findIndex(
+            (candidate, index) => !consumedAiRows.has(index) && rowIdentity(candidate) === rowIdentity(row),
+          )
+          if (duplicateIndex < 0) return true
+          consumedAiRows.add(duplicateIndex)
+          if (aiRows[duplicateIndex].currency !== row.currency) {
+            aiRows[duplicateIndex] = { ...aiRows[duplicateIndex], currency: row.currency }
+          }
+          return false
+        })
       const uniqueRows = [...aiRows, ...extras]
       return { parsed: { ...aiParsed, rows: lockCancelledStatementRows(uniqueRows) }, source: StatementSource.AI }
     }
@@ -461,9 +433,6 @@ export class StatementsService {
     return card
   }
 
-  // Corrects a wrongly identified card (the auto-detect can miss it): re-reconciles the rows that are not a card
-  // expense yet against the new card's expenses. A row already turned into a card expense (➕ Crear) keeps its own,
-  // since that expense is tied to whichever card it was created with
   private async changeCard(id: string, paymentMethodId: string): Promise<void> {
     const statement = await this.statementDBRepository.findById(id)
     if (paymentMethodId === statement.paymentMethodId) return
@@ -499,8 +468,6 @@ export class StatementsService {
     )
   }
 
-  // The typed password, then the document number of the chosen person, of the owner and of everyone else who has one
-  // (D94). A copy of the bytes is read each time, so trying again is safe
   private async openPdf(
     data: Buffer,
     typed: string | null | undefined,
@@ -528,12 +495,9 @@ export class StatementsService {
         if (!(error instanceof StatementPasswordException)) throw error
       }
     }
-    // Nothing opened it: a typed password was wrong, otherwise the right one is not saved anywhere
     throw new StatementPasswordException({ reason: typed ? 'incorrect' : 'missing' })
   }
 
-  // The statement of month M closes on the closing day of M: its period end says M; without it, the due date (paid
-  // in M when the due day comes after the closing day, otherwise in M+1)
   private periodOf(parsed: ParsedStatement, card: { billingCloseDay: number | null; paymentDueDay: number | null }) {
     if (parsed.periodEnd) return periodOfDay(parsed.periodEnd)
     if (parsed.dueDate) {
@@ -562,7 +526,6 @@ export class StatementsService {
 
   private async notify(view: Awaited<ReturnType<StatementsService['get']>>) {
     const count = (result: StatementRowResult) => view.rows.filter((row) => row.result === result).length
-    // What each other person of the card has on it (P30, D116): their purchases, to collect once saved
     const names = new Map((await this.personDBRepository.findActive()).map((person) => [person.id, person.name]))
     const byPerson = new Map<string, { personId: string; currency: string; amount: number }>()
     view.rows
