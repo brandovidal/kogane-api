@@ -168,9 +168,17 @@ export const debtBulkResponseSchema = z.object({
 })
 
 // Contraste con la tarjeta (D114): what each person owes on a card in a month vs what the statement billed
-export const cardCheckQuerySchema = z.object({ paymentMethodId: z.string().min(1), month, year })
+export const cardCheckQuerySchema = z.object({
+  paymentMethodId: z.string().min(1),
+  month,
+  year,
+  currency: z.enum(Currency).optional(),
+})
 
 export const cardCheckResponseSchema = z.object({
+  currency: z.enum(Currency),
+  availableCurrencies: z.array(z.enum(Currency)),
+  currencyReviewRequired: z.boolean(),
   paymentMethodId: z.string(),
   month: z.number().int(),
   year: z.number().int(),

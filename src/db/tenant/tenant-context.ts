@@ -36,4 +36,5 @@ export const TENANT_EXCLUDED_MODELS = new Set([
   'AuthAttempt',
   'AuditContext',
   'AiRequestLog',
+  'CurrencyCatalog', // public ISO codes; no user data
 ])

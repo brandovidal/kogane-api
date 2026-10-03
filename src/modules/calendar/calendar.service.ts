@@ -1,3 +1,4 @@
+import { statementBalances } from '@/modules/statements/statement.balance'
 import { Injectable } from '@nestjs/common'
 
 import { APP_TIME_ZONE } from '@/commons/constants/app.constant'
@@ -60,14 +61,20 @@ export interface CommittedInstallments {
   items: InstallmentItem[]
 }
 
-// A card statement is referenced as "<paymentMethodId>@<yyyy>-<mm>" (✅ Pagado of its reminder)
-export const cardStatementRef = (paymentMethodId: string, period: PaymentPeriod) =>
-  `${paymentMethodId}@${periodKey(period)}`
+// New reminders use "<paymentMethodId>@<yyyy>-<mm>:<currency>"; legacy references without a currency still parse.
+export const cardStatementRef = (paymentMethodId: string, period: PaymentPeriod, currency?: string) =>
+  `${paymentMethodId}@${periodKey(period)}${currency ? `:${currency}` : ''}`
 
-export function parseCardStatementRef(ref: string): { paymentMethodId: string; period: PaymentPeriod } | null {
-  const match = /^(.+)@(\d{4})-(\d{2})$/.exec(ref)
+export function parseCardStatementRef(
+  ref: string,
+): { paymentMethodId: string; period: PaymentPeriod; currency?: string } | null {
+  const match = /^(.+)@(\d{4})-(\d{2})(?::(PEN|USD))?$/.exec(ref)
   if (!match) return null
-  return { paymentMethodId: match[1], period: { paymentYear: Number(match[2]), paymentMonth: Number(match[3]) } }
+  return {
+    paymentMethodId: match[1],
+    period: { paymentYear: Number(match[2]), paymentMonth: Number(match[3]) },
+    ...(match[4] ? { currency: match[4] } : {}),
+  }
 }
 
 const statusOf = (paid: boolean, date: string, today: string) =>
@@ -97,7 +104,7 @@ export class CalendarService {
         case NotificationRefType.CARD_STATEMENT: {
           const ref = parseCardStatementRef(refId)
           if (!ref) return PaymentOutcome.NOT_FOUND
-          const count = await this.calendarDBRepository.payCardStatement(ref.paymentMethodId, ref.period)
+          const count = await this.calendarDBRepository.payCardStatement(ref.paymentMethodId, ref.period, ref.currency)
           return count > 0 ? PaymentOutcome.PAID : PaymentOutcome.NOTHING_TO_PAY
         }
         case NotificationRefType.FIXED_COST:
@@ -348,42 +355,50 @@ export class CalendarService {
             row.paymentMonth === period.paymentMonth &&
             row.paymentYear === period.paymentYear,
         )
-        const total = toCents(ofStatement.reduce((sum, row) => sum + amountOf(row), 0))
-        const unpaid = toCents(
-          ofStatement
-            .filter((row) => UNPAID_STATUSES.includes(row.paymentStatus))
-            .reduce((sum, row) => sum + amountOf(row), 0),
-        )
-        const base = {
-          name: card.name,
-          personName: null,
-          installment: null,
-          currency: 'PEN',
-          refType: NotificationRefType.CARD_STATEMENT,
-          refId: cardStatementRef(card.id, period),
-          color: card.color,
-        }
+        const balances = statement ? statementBalances(statement) : []
+        const currencies = new Set([
+          ...ofStatement.map((row) => row.currency),
+          ...balances.map((balance) => balance.currency),
+        ])
+        if (!currencies.size) currencies.add('PEN')
         const events: CalendarEvent[] = []
-        if (closeDate >= from && closeDate <= to) {
-          events.push({
-            ...base,
-            date: closeDate,
-            kind: CalendarEventKind.CARD_CLOSE,
-            amount: total || null,
-            status: closeDate < today ? CalendarEventStatus.PAID : CalendarEventStatus.PENDING,
-          })
-        }
-        // A statement with nothing in it has nothing to pay
-        const bankTotal = statement?.totalDue ?? null
-        if (dueDate >= from && dueDate <= to && (total > 0 || (bankTotal ?? 0) > 0)) {
-          const paid = total > 0 && unpaid === 0
-          events.push({
-            ...base,
-            date: dueDate,
-            kind: CalendarEventKind.CARD_DUE,
-            amount: !paid && bankTotal ? bankTotal : unpaid || total,
-            status: statusOf(paid, dueDate, today),
-          })
+        for (const currency of currencies) {
+          const currencyRows = ofStatement.filter((row) => row.currency === currency)
+          const total = toCents(currencyRows.reduce((sum, row) => sum + row.amount, 0))
+          const unpaid = toCents(
+            currencyRows
+              .filter((row) => UNPAID_STATUSES.includes(row.paymentStatus))
+              .reduce((sum, row) => sum + row.amount, 0),
+          )
+          const base = {
+            name: card.name,
+            personName: null,
+            installment: null,
+            currency,
+            refType: NotificationRefType.CARD_STATEMENT,
+            refId: cardStatementRef(card.id, period, currency),
+            color: card.color,
+          }
+          if (closeDate >= from && closeDate <= to) {
+            events.push({
+              ...base,
+              date: closeDate,
+              kind: CalendarEventKind.CARD_CLOSE,
+              amount: total || null,
+              status: closeDate < today ? CalendarEventStatus.PAID : CalendarEventStatus.PENDING,
+            })
+          }
+          const bankTotal = balances.find((balance) => balance.currency === currency)?.totalDue ?? null
+          if (dueDate >= from && dueDate <= to && (total > 0 || (bankTotal ?? 0) > 0)) {
+            const paid = total > 0 && unpaid === 0
+            events.push({
+              ...base,
+              date: dueDate,
+              kind: CalendarEventKind.CARD_DUE,
+              amount: !paid && bankTotal ? bankTotal : unpaid || total,
+              status: statusOf(paid, dueDate, today),
+            })
+          }
         }
         return events
       }),

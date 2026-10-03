@@ -128,9 +128,19 @@ export class CalendarDBRepository {
   }
 
   // ✅ Pagado of a card reminder: every unpaid row of that statement
-  async payCardStatement(paymentMethodId: string, { paymentMonth, paymentYear }: PaymentPeriod): Promise<number> {
+  async payCardStatement(
+    paymentMethodId: string,
+    { paymentMonth, paymentYear }: PaymentPeriod,
+    currency?: string,
+  ): Promise<number> {
     const { count } = await this.prisma.creditCardExpense.updateMany({
-      where: { paymentMethodId, paymentMonth, paymentYear, paymentStatus: { in: UNPAID_STATUSES } },
+      where: {
+        paymentMethodId,
+        paymentMonth,
+        paymentYear,
+        ...(currency ? { currency } : {}),
+        paymentStatus: { in: UNPAID_STATUSES },
+      },
       data: { paymentStatus: PaymentStatus.PAID },
     })
     return count

@@ -756,11 +756,43 @@ model Statement {
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
 
-  rows StatementRow[]
+  currencyReviewRequired Boolean            @default(false)
+  balances               StatementBalance[]
+  rows                   StatementRow[]
 
   @@index([paymentMethodId, paymentYear, paymentMonth])
   @@index([userId])
   @@map("imp_statements")
+}
+
+// Shared ISO currency catalog. Statement balances keep their original billing currency.
+model CurrencyCatalog {
+  code              String             @id
+  name              String
+  symbol            String
+  statementBalances StatementBalance[]
+
+  @@map("cat_currencies")
+}
+
+// One bank balance per currency. Never add amounts in PEN and USD together.
+model StatementBalance {
+  id                 String          @id @default(cuid())
+  userId             String?
+  statementId        String
+  statement          Statement       @relation(fields: [statementId], references: [id], onDelete: Cascade)
+  currency           String
+  currencyInfo       CurrencyCatalog @relation(fields: [currency], references: [code])
+  totalDue           Float?
+  minimumDue         Float?
+  previousBalance    Float?
+  previousPayments   Float?
+  monthlyPayment     Float?
+  minimumAllocations String?
+
+  @@unique([statementId, currency])
+  @@index([userId])
+  @@map("imp_statement_balances")
 }
 
 model StatementRow {

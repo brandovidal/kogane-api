@@ -51,20 +51,31 @@ export class AttachmentsService {
     if (!(ATTACHMENT_MIME_TYPES as readonly string[]).includes(contentType)) {
       throw new AttachmentInvalidException({ reason: 'type', contentType })
     }
-    await this.assertRefExists(body.refType, body.refId)
+    const resource = await this.assertRefExists(body.refType, body.refId)
 
     const stored = await this.storedFilesService.storeAttachment(
       ATTACHMENT_FOLDERS[body.refType],
       file.buffer,
       contentType,
     )
-    const created = await this.attachmentDBRepository.create({
-      fileId: stored.id,
-      refType: body.refType,
-      refId: body.refId,
-      kind: body.kind ?? AttachmentKind.OTHER,
-      name: body.name ?? file.originalname?.trim().slice(0, 120) ?? 'archivo',
-    })
+    let created: AttachmentWithFile
+    try {
+      const data = {
+        fileId: stored.id,
+        refType: body.refType,
+        refId: body.refId,
+        kind: body.kind ?? AttachmentKind.OTHER,
+        name: body.name ?? file.originalname?.trim().slice(0, 120) ?? 'archivo',
+      }
+      created =
+        body.kind === AttachmentKind.BOLETA && resource === ExpenseResource.FIXED_COST
+          ? await this.attachmentDBRepository.create(data, true)
+          : await this.attachmentDBRepository.create(data)
+    } catch (error) {
+      // A failed database transaction must not leave a kept file with no attachment.
+      await this.release([stored.id])
+      throw error
+    }
     return this.toView(created)
   }
 
@@ -100,7 +111,7 @@ export class AttachmentsService {
     }
   }
 
-  private async assertRefExists(refType: AttachmentRefType, refId: string): Promise<void> {
+  private async assertRefExists(refType: AttachmentRefType, refId: string): Promise<ExpenseResource | undefined> {
     if (refType === AttachmentRefType.COMMITMENT) {
       await this.commitmentDBRepository.findById(refId)
       return
@@ -111,7 +122,7 @@ export class AttachmentsService {
     }
     const tables = refType === AttachmentRefType.FIXED_COST ? [ExpenseResource.FIXED_COST] : EXPENSE_TABLES
     for (const table of tables) {
-      if (await this.expenseRecordDBRepository.exists(table, refId)) return
+      if (await this.expenseRecordDBRepository.exists(table, refId)) return table
     }
     throw new ExpenseNotFoundException({ refType, refId })
   }

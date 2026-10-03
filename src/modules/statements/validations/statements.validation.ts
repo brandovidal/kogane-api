@@ -1,5 +1,7 @@
 import { z } from 'zod'
 
+import { Currency } from '@/commons/constants/expense.constant'
+
 import { StatementRowResult, StatementSource, StatementStatus } from '@/commons/constants/statement.constant'
 import { dateTimeSchema } from '@/commons/helpers/api-response.helper'
 
@@ -11,14 +13,38 @@ export const uploadStatementSchema = z.object({
   savePassword: z.stringbool().optional(),
 })
 
+const updateStatementBalanceSchema = z
+  .object({
+    currency: z.enum(Currency),
+    totalDue: z.number().nullable().optional(),
+    minimumDue: z.number().nullable().optional(),
+    previousBalance: z.number().nullable().optional(),
+    previousPayments: z.number().nullable().optional(),
+    monthlyPayment: z.number().nullable().optional(),
+  })
+  .refine((balance) => Object.keys(balance).some((key) => key !== 'currency'))
+
 export const updateStatementSchema = z
   .object({
     personId: z.string().min(1).optional(),
+    // Corrects a wrongly identified card (D-105+): re-reconciles the rows that are not a card expense yet
+    paymentMethodId: z.string().min(1).optional(),
+    currency: z.enum(Currency).optional(),
     minimumDue: z.number().nonnegative().nullable().optional(),
     minimumAllocations: z.record(z.string(), z.number().nonnegative()).nullable().optional(),
+    balances: z
+      .array(updateStatementBalanceSchema)
+      .min(1)
+      .refine((balances) => new Set(balances.map((balance) => balance.currency)).size === balances.length)
+      .optional(),
   })
   .refine(
-    (value) => value.personId !== undefined || value.minimumDue !== undefined || value.minimumAllocations !== undefined,
+    (value) =>
+      value.personId !== undefined ||
+      value.paymentMethodId !== undefined ||
+      value.minimumDue !== undefined ||
+      value.minimumAllocations !== undefined ||
+      value.balances !== undefined,
   )
 
 // Selección múltiple (D116): the person of several purchases at once; null goes back to the statement's
@@ -53,7 +79,18 @@ export const updateRowSchema = z
 
 // ==================== Responses (Swagger / kogane-app types) ====================
 
+export const statementBalanceResponseSchema = z.object({
+  currency: z.enum(Currency),
+  totalDue: z.number().nullable(),
+  minimumDue: z.number().nullable(),
+  previousBalance: z.number().nullable(),
+  previousPayments: z.number().nullable(),
+  monthlyPayment: z.number().nullable(),
+})
+
 const statementFields = {
+  currencyReviewRequired: z.boolean(),
+  balances: z.array(statementBalanceResponseSchema),
   id: z.string(),
   paymentMethodId: z.string(),
   personId: z.string().nullable(),
@@ -98,6 +135,16 @@ export const statementRowResponseSchema = z.object({
 
 export const statementResponseSchema = z.object({
   ...statementFields,
+  balances: z.array(
+    statementBalanceResponseSchema.extend({
+      koganeTotal: z.number(),
+      difference: z.number().nullable(),
+      // "Resumen de movimientos y pagos del mes" (D95): computed from the rows below, not stated by the bank
+      directConsumption: z.number().describe('Purchases without an installment plan, no interest/fees'),
+      installmentConsumption: z.number().describe('Purchases with an installment plan ("2/6"), no interest/fees'),
+      itemizedCharges: z.number().describe('Interest, insurance, commissions, ITF… as itemized rows'),
+    }),
+  ),
   rows: z.array(statementRowResponseSchema),
   missing: z
     .array(
@@ -105,6 +152,7 @@ export const statementResponseSchema = z.object({
         id: z.string(),
         description: z.string(),
         amount: z.number(),
+        currency: z.string(),
         processDate: z.string().nullable(),
         installment: z.string().nullable(),
         personId: z.string(),

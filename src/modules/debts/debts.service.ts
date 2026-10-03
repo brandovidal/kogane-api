@@ -226,17 +226,34 @@ export class DebtsService {
   }
 
   // Contraste con la tarjeta (D114): what others owe of a card and month vs the statement of that month
-  async cardCheck({ paymentMethodId, month, year }: CardCheckQueryDto) {
+  async cardCheck({ paymentMethodId, month, year, currency = Currency.PEN }: CardCheckQueryDto) {
     const period: PaymentPeriod = { paymentMonth: month, paymentYear: year }
     const currentMonth = DateHelper.startOfDayIn(APP_TIME_ZONE, new Date(Date.UTC(year, month - 1, 15, 12)))
     const nextMonth = DateHelper.startOfDayIn(APP_TIME_ZONE, new Date(Date.UTC(year, month, 15, 12)))
-    const [debts, statement, next, expenses, cardPayments] = await Promise.all([
+    const [allDebts, statement, next, allExpenses, allCardPayments] = await Promise.all([
       this.debtDBRepository.findMany({ direction: DebtDirection.OWED_TO_ME, paymentMethodId, month, year }),
       this.statementDBRepository.findLatestForCard(paymentMethodId, period),
       this.statementDBRepository.findLatestForCard(paymentMethodId, addMonths(period, 1)),
       this.statementDBRepository.findCardExpenses(paymentMethodId, period),
       this.debtDBRepository.findCardPayments(paymentMethodId, currentMonth, nextMonth),
     ])
+
+    const debts = allDebts.filter((item) => (item.currency ?? Currency.PEN) === currency)
+    const expenses = allExpenses.filter((item) => (item.currency ?? Currency.PEN) === currency)
+    const cardPayments = allCardPayments.filter((item) => (item.debt.currency ?? Currency.PEN) === currency)
+    const balance =
+      statement?.balances?.find((item) => item.currency === currency) ??
+      (statement?.currency === currency ? statement : null)
+    const availableCurrencies = [
+      ...new Set([
+        currency,
+        ...(statement?.balances?.map((item) => item.currency) ?? []),
+        ...allExpenses.map((item) => item.currency ?? Currency.PEN),
+        ...allDebts.map((item) => item.currency ?? Currency.PEN),
+      ]),
+    ]
+      .filter((item) => item === Currency.PEN || item === Currency.USD)
+      .sort()
 
     const byPerson = new Map<string, { personId: string; name: string; owed: number; paid: number; balance: number }>()
     for (const debt of debts) {
@@ -284,35 +301,38 @@ export class DebtsService {
       expensesByPerson.set(expense.personId, row)
     }
     const koganeTotal = toCents(expenses.reduce((sum, expense) => sum + expense.amount, 0))
-    const statementTotal = statement?.totalDue ?? null
+    const statementTotal = balance?.totalDue ?? null
     const expensePersonIds = new Map(expenses.map((expense) => [expense.id, expense.personId]))
     const statementRows =
-      statement?.rows.map((row) => ({
-        id: row.id,
-        date: row.date,
-        description: row.description,
-        label: row.label,
-        amount: row.amount,
-        installment: row.installment,
-        result: row.result,
-        personId: (row.expenseId && expensePersonIds.get(row.expenseId)) || row.personId || statement.personId,
-        expenseId: row.expenseId,
-        debtId: row.debtId,
-      })) ?? []
+      statement?.rows
+        .filter((row) => (row.currency ?? Currency.PEN) === currency)
+        .map((row) => ({
+          id: row.id,
+          date: row.date,
+          description: row.description,
+          label: row.label,
+          amount: row.amount,
+          installment: row.installment,
+          result: row.result,
+          personId: (row.expenseId && expensePersonIds.get(row.expenseId)) || row.personId || statement.personId,
+          expenseId: row.expenseId,
+          debtId: row.debtId,
+        })) ?? []
 
     return {
       paymentMethodId,
       month,
       year,
+      currency,
+      availableCurrencies,
+      currencyReviewRequired: statement?.currencyReviewRequired ?? false,
       statementId: statement?.id ?? null,
       statementPersonId: statement?.personId ?? null,
       statementTotal,
       statementPeriodEnd: statement?.periodEnd ?? null,
       statementDueDate: statement?.dueDate ?? null,
-      minimumDue: statement?.minimumDue ?? null,
-      minimumAllocations: statement?.minimumAllocations
-        ? this.parseMinimumAllocations(statement.minimumAllocations)
-        : null,
+      minimumDue: balance?.minimumDue ?? null,
+      minimumAllocations: balance?.minimumAllocations ? this.parseMinimumAllocations(balance.minimumAllocations) : null,
       koganeTotal,
       unexplained: statementTotal == null ? null : toCents(statementTotal - koganeTotal),
       othersOwed: toCents(people.reduce((sum, row) => sum + row.owed, 0)),
@@ -323,7 +343,7 @@ export class DebtsService {
       statementRows,
       possibleInterest: [statement, next]
         .flatMap((candidate) => candidate?.rows ?? [])
-        .filter((row) => INTEREST_LINE.test(fold(row.description)))
+        .filter((row) => (row.currency ?? Currency.PEN) === currency && INTEREST_LINE.test(fold(row.description)))
         .map((row) => ({ description: row.description, amount: row.amount })),
     }
   }

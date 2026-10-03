@@ -1,3 +1,4 @@
+import { statementBalances, StatementBalanceData } from './statement.balance'
 import { z } from 'zod'
 
 import { Currency } from '@/commons/constants/expense.constant'
@@ -14,7 +15,13 @@ Return JSON with:
 - totalDue: total amount to pay of this statement, or null. minimumDue: minimum payment, or null.
 - previousBalance: "saldo mes anterior" before payments, or null. previousPayments: total payments/credits applied against
   that balance as a positive number, or null. monthlyPayment: the amount labelled "pago del mes", or null.
-- currency: "PEN" or "USD" of the totals.
+- balances: one object per billing currency printed in the PDF (PEN and/or USD). Each has currency, totalDue,
+  minimumDue, previousBalance, previousPayments, monthlyPayment. Use null when a value is not printed.
+  Read soles and dollars columns independently, even when both are on the same line. Never add them or convert.
+- currency and the top-level totals: compatibility copy of the PEN balance, or USD if there is no PEN balance.
+- The billing currency of each movement comes from its column, section heading or explicit symbol, NOT the country
+  of the merchant. A foreign merchant can bill in soles. Do not use the original purchase amount in a second
+  currency as another movement when the bank already converted it to the billing currency.
 - movements: every purchase and every individual charge of the period, one per line of the statement: date (YYYY-MM-DD,
   the processing date when there are two), description as printed, amount (positive for charges, negative for annulments), currency, installment "n/m"
   when the line is an installment of a purchase, otherwise null. Include itemized compensatory or late interest, insurance,
@@ -30,7 +37,17 @@ const day = z
   .regex(/^\d{4}-\d{2}-\d{2}$/)
   .nullable()
 
+const balanceSchema = z.object({
+  currency: z.enum(Currency),
+  totalDue: z.number().nullable(),
+  minimumDue: z.number().nullable(),
+  previousBalance: z.number().nullable(),
+  previousPayments: z.number().nullable(),
+  monthlyPayment: z.number().nullable(),
+})
+
 export const statementAiSchema = z.object({
+  balances: z.array(balanceSchema).max(2).optional(),
   cardName: z.string().nullable(),
   holderName: z.string().nullable().optional(), // optional: answers recorded before it still parse
   periodEnd: day,
@@ -64,21 +81,31 @@ export const statementAiJsonSchema = (() => {
 export type StatementAiOutput = z.infer<typeof statementAiSchema>
 
 export function fromAi(output: StatementAiOutput, cardHint: string | null): ParsedStatement {
-  const previousBalance = output.previousBalance ?? null
-  const previousPayments = output.previousPayments ?? (previousBalance != null ? 0 : null)
-  const monthlyPayment = output.monthlyPayment ?? null
+  const balances: StatementBalanceData[] = output.balances?.length
+    ? output.balances
+    : statementBalances({
+        ...output,
+        previousBalance: output.previousBalance ?? null,
+        previousPayments: output.previousPayments ?? (output.previousBalance != null ? 0 : null),
+        monthlyPayment: output.monthlyPayment ?? null,
+      })
+  const normalizedBalances = balances.map((balance) => ({
+    ...balance,
+    totalDue: balance.totalDue ?? balance.monthlyPayment,
+  }))
+  const primary = normalizedBalances.find((balance) => balance.currency === Currency.PEN) ?? normalizedBalances[0]
   const rows = output.movements.map((movement) => ({ ...movement }))
-  if (previousBalance != null && previousPayments != null) {
-    const remainder = Math.round((previousBalance - previousPayments) * 100) / 100
-    if (remainder > 0) {
+  for (const balance of normalizedBalances) {
+    if (balance.previousBalance == null || balance.previousPayments == null) continue
+    const remainder = Math.round((balance.previousBalance - balance.previousPayments) * 100) / 100
+    if (remainder > 0)
       rows.push({
         date: null,
-        description: `Saldo mes anterior neto (${previousBalance.toFixed(2)} - ${previousPayments.toFixed(2)})`,
+        description: `Saldo mes anterior neto (${balance.previousBalance.toFixed(2)} - ${balance.previousPayments.toFixed(2)})`,
         amount: remainder,
-        currency: output.currency,
+        currency: balance.currency as Currency,
         installment: null,
       })
-    }
   }
   return {
     cardHint,
@@ -86,12 +113,8 @@ export function fromAi(output: StatementAiOutput, cardHint: string | null): Pars
     cardName: output.cardName,
     periodEnd: output.periodEnd,
     dueDate: output.dueDate,
-    totalDue: output.totalDue ?? monthlyPayment,
-    minimumDue: output.minimumDue,
-    previousBalance,
-    previousPayments,
-    monthlyPayment,
-    currency: output.currency,
+    ...primary,
+    balances: normalizedBalances,
     rows: lockCancelledStatementRows(rows),
   }
 }

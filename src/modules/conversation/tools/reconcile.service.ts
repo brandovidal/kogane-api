@@ -1,3 +1,4 @@
+import { statementBalances } from '@/modules/statements/statement.balance'
 import { Injectable } from '@nestjs/common'
 
 import { CatalogKind } from '@/commons/constants/expense-extraction.constant'
@@ -55,18 +56,30 @@ export class ReconcileService {
       }),
     ])
     const linked = new Set(statement.rows.map((row) => row.expenseId).filter(Boolean))
-    const summary = {
-      card: card.name,
-      month: statement.paymentMonth,
-      year: statement.paymentYear,
-      currency: statement.currency,
-      totalDue: statement.totalDue,
-      registered: toCents(expenses.reduce((sum, expense) => sum + expense.amount, 0)),
-      newRows: statement.rows.filter((row) => row.result === StatementRowResult.NEW).length,
-      missing: expenses
-        .filter((expense) => !linked.has(expense.id))
-        .map(({ description, amount }) => ({ description, amount })),
-    }
-    return { reply: { text: formatReconcile(summary) }, asksCard: false }
+    const balances = statementBalances(statement)
+    const currencies = new Set([
+      ...balances.map((balance) => balance.currency),
+      ...expenses.map((expense) => expense.currency),
+    ])
+    const summaries = [...currencies].map((currency) =>
+      formatReconcile({
+        card: `${card.name} · ${currency}`,
+        month: statement.paymentMonth,
+        year: statement.paymentYear,
+        currency,
+        totalDue: balances.find((balance) => balance.currency === currency)?.totalDue ?? null,
+        registered: toCents(
+          expenses.filter((expense) => expense.currency === currency).reduce((sum, expense) => sum + expense.amount, 0),
+        ),
+        newRows: statement.rows.filter((row) => row.currency === currency && row.result === StatementRowResult.NEW)
+          .length,
+        missing: expenses
+          .filter((expense) => expense.currency === currency && !linked.has(expense.id))
+          .map(({ description, amount }) => ({ description, amount })),
+      }),
+    )
+    if (statement.currencyReviewRequired)
+      summaries.push('Vuelve a cargar el PDF en Importación para revisar sus monedas.')
+    return { reply: { text: summaries.join('\n\n') }, asksCard: false }
   }
 }
