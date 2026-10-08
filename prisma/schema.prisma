@@ -54,6 +54,10 @@ model PaymentMethod {
   type                 String // PaymentMethodType
   code                 String? // short code of credit cards (CMR, OH, IO, AMEX)
   bank                 String? // debit cards require it (D107)
+  network              String? // Visa, Mastercard, American Express, etc.
+  currency             String? // preferred card currency (PEN or USD)
+  creditLimit          Float?
+  comment              String?
   aliases              String   @default("[]") // JSON array of lowercase aliases used by the AI
   isActive             Boolean  @default(true)
   showInBot            Boolean  @default(true) // offered as a quick reply button in the bot

@@ -11,7 +11,6 @@ export const personSchema = z.object({
   aliases: aliases.optional(),
   isDefault: z.boolean().optional(),
   isActive: z.boolean().optional(),
-  // DNI or CE: the password of the bank statement PDFs (D94). Answered masked, never whole
   documentNumber: z
     .string()
     .trim()
@@ -27,16 +26,18 @@ export const paymentMethodSchema = z.object({
   aliases: aliases.optional(),
   isActive: z.boolean().optional(),
   showInBot: z.boolean().optional(),
-  // credit cards: the closing day decides the billing month (D22)
   billingCloseDay: day.nullable().optional(),
   paymentDueDay: day.nullable().optional(),
   supportsAmortization: z.boolean().optional(),
   supportsCashback: z.boolean().optional(),
   bank: z.string().trim().min(1).max(40).nullable().optional(),
+  network: z.string().trim().max(40).nullable().optional(),
+  currency: z.enum(['PEN', 'USD']).nullable().optional(),
+  creditLimit: z.number().min(0).nullable().optional(),
+  comment: z.string().trim().max(500).nullable().optional(),
   color: z.string().trim().max(20).nullable().optional(),
 })
 
-// What a card needs to be saved from the web (D97): a credit card its code and billing days, a debit card its bank
 type CardFields = Partial<Record<'type' | 'code' | 'bank' | 'billingCloseDay' | 'paymentDueDay', unknown>>
 export const CARD_REQUIRED_FIELDS: Partial<Record<PaymentMethodType, (keyof CardFields)[]>> = {
   [PaymentMethodType.CREDIT_CARD]: ['code', 'billingCloseDay', 'paymentDueDay'],
@@ -94,6 +95,10 @@ export const paymentMethodResponseSchema = z.object({
   supportsAmortization: z.boolean(),
   supportsCashback: z.boolean(),
   bank: z.string().nullable(),
+  network: z.string().nullable(),
+  currency: z.enum(['PEN', 'USD']).nullable(),
+  creditLimit: z.number().nullable(),
+  comment: z.string().nullable(),
   color: z.string().nullable(),
 })
 
@@ -114,7 +119,6 @@ export const budgetGroupResponseSchema = z.object({
   order: z.number().int(),
 })
 
-// Titular and additional people of a credit card (D116): exactly one titular; last4 as the statement prints it
 export const cardHoldersSchema = z.object({
   holders: z
     .array(

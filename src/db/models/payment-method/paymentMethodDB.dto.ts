@@ -14,5 +14,9 @@ export interface PaymentMethodWriteDbDto {
   supportsAmortization?: boolean
   supportsCashback?: boolean
   bank?: string | null
+  network?: string | null
+  currency?: string | null
+  creditLimit?: number | null
+  comment?: string | null
   color?: string | null
 }
