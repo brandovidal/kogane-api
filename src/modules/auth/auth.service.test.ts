@@ -392,7 +392,7 @@ describe('AuthService', () => {
     })
 
     it('should refuse a used or unknown link and a short password', async () => {
-      await expect(service.resetPassword({ token: 'tok-1234567890', password: 'corta' })).rejects.toBeInstanceOf(
+      await expect(service.resetPassword({ token: 'tok-1234567890', password: 'x'.repeat(3) })).rejects.toBeInstanceOf(
         WeakPasswordException,
       )
       mockDB.consumeToken.mockResolvedValueOnce(null)

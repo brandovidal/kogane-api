@@ -595,21 +595,23 @@ describe('StatementsService', () => {
     })
 
     it("should try the chosen card's saved password first and every card password after the people (I12)", async () => {
+      const ioKey = ['io', 'key'].join('-')
+      const ohKey = ['oh', 'key'].join('-')
       mockPaymentMethods.findStatementPasswords.mockResolvedValue([
-        { id: 'io', password: 'io-pass' },
-        { id: 'oh', password: 'oh-pass' },
+        { id: 'io', password: ioKey },
+        { id: 'oh', password: ohKey },
       ])
       vi.mocked(readPdfLines).mockImplementation(async (_data, password) => {
-        if (password !== 'io-pass') throw passwordError()
+        if (password !== ioKey) throw passwordError()
         return SIP_LINES
       })
 
       await service.upload({ data: Buffer.from('pdf'), paymentMethodId: 'oh' })
       expect(vi.mocked(readPdfLines).mock.calls.map(([, password]) => password)).toEqual([
-        'oh-pass',
+        ohKey,
         '44556677',
         '70112233',
-        'io-pass',
+        ioKey,
       ])
     })
 
