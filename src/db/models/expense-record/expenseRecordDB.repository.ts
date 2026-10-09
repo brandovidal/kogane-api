@@ -1,10 +1,11 @@
 import { Injectable } from '@nestjs/common'
 
+import { dateRange, parseYearMonth, paymentRangeWhere } from '@/commons/helpers/period-range.helper'
 import { PrismaService } from '@/db/prisma/prisma.service'
 import { PrismaErrorCode } from '@/commons/constants/database.constant'
 import { ExpenseDraftStatus } from '@/commons/constants/expense-draft.constant'
 import { RECURRING_KINDS, RecurringTargetType, SubscriptionKind } from '@/commons/constants/expense.constant'
-import { convertRow, MovableTable, MoveTarget } from '@/commons/helpers/expense-move.helper'
+import { convertRow, copyRow, MovableTable, MoveTarget } from '@/commons/helpers/expense-move.helper'
 import { isPrismaError } from '@/commons/helpers/prisma-error.helper'
 import { ExpenseNotFoundException } from '@/commons/exceptions/expense/expense-not-found.exception'
 
@@ -40,6 +41,8 @@ const PERIOD_FILTER: Record<ExpenseResource, 'payment' | 'spentAt' | 'none'> = {
 export interface ExpenseRecordFilter {
   month?: number
   year?: number
+  from?: string // YYYY-MM, with `to`: a range of months (PeriodFilter), only without month and year
+  to?: string
   personId?: string
   paymentMethodId?: string
   kind?: 'platform' | 'recurring' // subscriptions only: Plataformas or Recurrentes (D107)
@@ -68,7 +71,10 @@ export interface ExpenseSeries {
 export class ExpenseRecordDBRepository {
   constructor(private readonly prisma: PrismaService) {}
 
-  async findMany(resource: ExpenseResource, { month, year, personId, paymentMethodId, kind }: ExpenseRecordFilter) {
+  async findMany(
+    resource: ExpenseResource,
+    { month, year, from, to, personId, paymentMethodId, kind }: ExpenseRecordFilter,
+  ) {
     const where: Record<string, unknown> = {}
     if (personId) where.personId = personId
     if (paymentMethodId) where.paymentMethodId = paymentMethodId
@@ -81,6 +87,11 @@ export class ExpenseRecordDBRepository {
       if (PERIOD_FILTER[resource] === 'spentAt') {
         where.spentAt = { gte: new Date(Date.UTC(year, month - 1, 1)), lt: new Date(Date.UTC(year, month, 1)) }
       }
+    } else if (from || to) {
+      const start = parseYearMonth(from)
+      const end = parseYearMonth(to)
+      if (PERIOD_FILTER[resource] === 'payment') Object.assign(where, paymentRangeWhere(start, end))
+      if (PERIOD_FILTER[resource] === 'spentAt') where.spentAt = dateRange(start, end)
     }
 
     return this.delegate(resource).findMany({ where, orderBy: { createdAt: 'desc' } })
@@ -189,6 +200,22 @@ export class ExpenseRecordDBRepository {
         data: templateData,
       })
     })
+  }
+
+  // "Marcar como revisados" of Tarjetas (null unmarks)
+  async setReviewed(ids: string[], reviewedAt: Date | null): Promise<number> {
+    return (await this.prisma.creditCardExpense.updateMany({ where: { id: { in: ids } }, data: { reviewedAt } })).count
+  }
+
+  // "Copiar" of Transferir: new unpaid rows in the target table, the series and its templates stay as they are
+  async copySeries(resource: ExpenseResource, to: ExpenseResource, ids: string[], target: MoveTarget) {
+    const from = MOVABLE_TABLE[resource]!
+    const into = MOVABLE_TABLE[to]!
+    const rows = (await this.delegate(resource).findMany({ where: { id: { in: ids } } })) as Record<string, unknown>[]
+    const data = rows.map((row) => copyRow(row, from, into, target))
+    if (!data.length) return
+    if (into === 'fixedCost') await this.prisma.fixedCost.createMany({ data: data as never })
+    else await this.prisma.subscription.createMany({ data: data as never })
   }
 
   private delegate(resource: ExpenseResource): Delegate {

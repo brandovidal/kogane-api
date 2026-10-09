@@ -100,6 +100,17 @@ export const paymentMethodResponseSchema = z.object({
   creditLimit: z.number().nullable(),
   comment: z.string().nullable(),
   color: z.string().nullable(),
+  hasStatementPassword: z.boolean().describe('A statement PDF password is saved for this card (I12); never returned'),
+})
+
+export const statementPasswordSchema = z.object({
+  password: z
+    .string()
+    .trim()
+    .min(1)
+    .max(64)
+    .nullable()
+    .describe('The password of the statement PDFs of this card; null removes it'),
 })
 
 export const categoryResponseSchema = z.object({

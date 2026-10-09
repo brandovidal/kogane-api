@@ -17,6 +17,15 @@ export const acceptInviteSchema = z.object({
   password,
 })
 
+export const forgotPasswordSchema = z.object({
+  email: email.describe('The email of the account; the answer is the same whether it exists or not'),
+})
+
+export const resetPasswordSchema = z.object({
+  token: z.string().min(10).describe('The token of the emailed link (?restablecer=…)'),
+  password,
+})
+
 export const googleStartQuerySchema = z.object({
   returnTo: z.string().optional().describe('A path of the web to go back to after signing in'),
   invite: z.string().optional().describe('The token of an invitation, when they came from its link'),
@@ -85,7 +94,7 @@ export const superadminCreatedSchema = z.object({
 
 export const authConfigSchema = z.object({
   google: z.boolean().describe('Google sign-in is set up'),
-  mail: z.boolean().describe('Invitations can be emailed'),
+  mail: z.boolean().describe('Invitations and password reset links can be emailed'),
 })
 
 export const invitePreviewSchema = z.object({ email: z.string(), role: z.enum(UserRole) })

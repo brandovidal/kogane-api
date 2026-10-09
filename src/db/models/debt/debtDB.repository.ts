@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common'
 
+import { parseYearMonth, paymentRangeWhere } from '@/commons/helpers/period-range.helper'
 import { PrismaService } from '@/db/prisma/prisma.service'
 import { PrismaErrorCode } from '@/commons/constants/database.constant'
 import { DEBT_PAYMENT_PROPOSAL_MINUTES, OPEN_DEBT_STATUSES } from '@/commons/constants/debt.constant'
@@ -24,7 +25,8 @@ type Transaction = Parameters<Parameters<PrismaService['$transaction']>[0]>[0]
 const WITH_PERSON = { person: { select: { id: true, name: true } } } as const
 
 // That payment month, or every month up to it (Cobros / Deudas, D111)
-function periodFilter(month?: number, year?: number, until?: boolean) {
+function periodFilter(month?: number, year?: number, until?: boolean, from?: string, to?: string) {
+  if (!month && !year && (from || to)) return paymentRangeWhere(parseYearMonth(from), parseYearMonth(to))
   if (!month || !year) return year ? { paymentYear: until ? { lte: year } : year } : {}
   if (!until) return { paymentMonth: month, paymentYear: year }
   return { OR: [{ paymentYear: { lt: year } }, { paymentYear: year, paymentMonth: { lte: month } }] }
@@ -45,6 +47,8 @@ export class DebtDBRepository {
     month,
     year,
     until,
+    from,
+    to,
     paymentMethodId,
   }: DebtFilterDbDto): Promise<DebtWithPersonDbDto[]> {
     return this.prisma.debt.findMany({
@@ -53,7 +57,7 @@ export class DebtDBRepository {
         direction,
         paymentMethodId,
         ...(statuses?.length ? { status: { in: statuses } } : {}),
-        ...periodFilter(month, year, until),
+        ...periodFilter(month, year, until, from, to),
       },
       include: WITH_PERSON,
       orderBy: [...BY_PERIOD],
@@ -114,6 +118,40 @@ export class DebtDBRepository {
     }
   }
 
+  // "Arrastrar saldos pendientes": open installments of months before the target, oldest first
+  findCarryable(target: { month: number; year: number }, filters: { direction?: string; personId?: string }) {
+    return this.prisma.debt.findMany({
+      where: {
+        ...filters,
+        status: { in: [...OPEN_DEBT_STATUSES] },
+        OR: [{ paymentYear: { lt: target.year } }, { paymentYear: target.year, paymentMonth: { lt: target.month } }],
+      },
+      orderBy: [...BY_PERIOD],
+    })
+  }
+
+  // Moves them to the target month in one transaction; the month they had is kept only the first time
+  async carryOver(
+    debts: { id: string; paymentMonth: number; paymentYear: number; carriedFromMonth: number | null }[],
+    target: { month: number; year: number },
+  ): Promise<number> {
+    await this.prisma.$transaction(async (tx) => {
+      for (const debt of debts) {
+        await tx.debt.update({
+          where: { id: debt.id },
+          data: {
+            paymentMonth: target.month,
+            paymentYear: target.year,
+            ...(debt.carriedFromMonth == null
+              ? { carriedFromMonth: debt.paymentMonth, carriedFromYear: debt.paymentYear }
+              : {}),
+          },
+        })
+      }
+    })
+    return debts.length
+  }
+
   async deleteMany(ids: string[]): Promise<number> {
     return (await this.prisma.debt.deleteMany({ where: { id: { in: ids } } })).count
   }
@@ -171,11 +209,16 @@ export class DebtDBRepository {
   }
 
   // A payment registered from the web: confirmed at once
-  addPayment(data: CreateDebtPaymentDbDto): Promise<Debt> {
+  // The debt recomputed, plus the id of the new payment (its Comprobante is attached to it, refType debt_payment)
+  addPayment(data: CreateDebtPaymentDbDto): Promise<Debt & { paymentId: string }> {
     return this.prisma.$transaction(async (tx) => {
-      await tx.debtPayment.create({ data: { ...data, confirmedAt: new Date() } })
-      return this.recompute(tx, data.debtId)
+      const payment = await tx.debtPayment.create({ data: { ...data, confirmedAt: new Date() } })
+      return { ...(await this.recompute(tx, data.debtId)), paymentId: payment.id }
     })
+  }
+
+  findPayment(id: string) {
+    return this.prisma.debtPayment.findUnique({ where: { id } })
   }
 
   async deletePayment(debtId: string, paymentId: string): Promise<Debt> {

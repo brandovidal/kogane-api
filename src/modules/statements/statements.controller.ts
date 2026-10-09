@@ -27,7 +27,11 @@ import {
   UpdateStatementDto,
   UploadStatementDto,
 } from './dto/request/statements.dto'
-import { StatementListResponseDto, StatementResponseDto } from './dto/response/statements-response.dto'
+import {
+  StatementFileResponseDto,
+  StatementListResponseDto,
+  StatementResponseDto,
+} from './dto/response/statements-response.dto'
 import { StatementsService } from './statements.service'
 
 // Estados de cuenta (P14 block 2, D95)
@@ -52,6 +56,10 @@ export class StatementsController {
           type: 'string',
           description: 'Optional person override; otherwise detected from the statement holder',
         },
+        saveCardPassword: {
+          type: 'boolean',
+          description: 'Save the typed password on the card of the statement (I12), if it opened it',
+        },
         savePassword: {
           type: 'boolean',
           description: 'Save the typed password as the document number of the statement person (if it opened it)',
@@ -73,6 +81,14 @@ export class StatementsController {
   @ResponseMessage('STATEMENTS_LISTED', 'Statements listed')
   list() {
     return this.statementsService.list()
+  }
+
+  @Get(':id/file')
+  @ApiOperation({ summary: '"Ver estado de cuenta": a signed link (10 minutes) to its PDF; url null when not kept' })
+  @ApiOkResponse({ type: StatementFileResponseDto })
+  @ResponseMessage('STATEMENT_FILE', 'Statement file link')
+  file(@Param('id') id: string) {
+    return this.statementsService.fileUrl(id)
   }
 
   @Get(':id')

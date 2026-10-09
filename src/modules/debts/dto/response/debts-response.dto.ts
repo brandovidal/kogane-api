@@ -5,6 +5,8 @@ import { responseDto } from '@/commons/helpers/api-response.helper'
 import {
   cardCheckResponseSchema,
   debtBulkResponseSchema,
+  debtPaymentCreatedResponseSchema,
+  debtCarryOverResponseSchema,
   debtDetailResponseSchema,
   debtResponseSchema,
   debtSummaryResponseSchema,
@@ -17,4 +19,6 @@ export class DebtCreatedResponseDto extends responseDto(z.array(debtResponseSche
 export class DebtDetailResponseDto extends responseDto(debtDetailResponseSchema) {}
 export class DebtSummaryResponseDto extends responseDto(z.array(debtSummaryResponseSchema)) {}
 export class DebtBulkResponseDto extends responseDto(debtBulkResponseSchema) {}
+export class DebtCarryOverResponseDto extends responseDto(debtCarryOverResponseSchema) {}
 export class CardCheckResponseDto extends responseDto(cardCheckResponseSchema) {}
+export class DebtPaymentCreatedResponseDto extends responseDto(debtPaymentCreatedResponseSchema) {}

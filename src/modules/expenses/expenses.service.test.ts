@@ -8,9 +8,17 @@ import { ExpenseRecordDBRepository, ExpenseResource } from '@/db/models/expense-
 import { AttachmentsService } from '@/modules/attachments/attachments.service'
 import { StoredFilesService } from '@/modules/stored-files/stored-files.service'
 
+import { RecurringTemplateExistsException } from '@/commons/exceptions/expense/recurring-template-exists.exception'
 import { ExpensesService } from './expenses.service'
 
-const mockExpenseRecordDB = { delete: vi.fn(), create: vi.fn(), update: vi.fn(), findMany: vi.fn() }
+const mockExpenseRecordDB = {
+  delete: vi.fn(),
+  create: vi.fn(),
+  update: vi.fn(),
+  findMany: vi.fn(),
+  findSeries: vi.fn(),
+  findById: vi.fn(),
+}
 const mockStoredFiles = { release: vi.fn() }
 const mockAttachments = { removeOf: vi.fn() }
 
@@ -193,6 +201,48 @@ describe('ExpensesService', () => {
         year: 2026,
         personId: 'person-1',
       })
+    })
+  })
+
+  describe('recurringFromSeries', () => {
+    it('should repeat the latest row of the series as a monthly template', async () => {
+      mockExpenseRecordDB.findSeries.mockResolvedValue({
+        rows: [{ id: 'f1' }, { id: 'f2' }],
+        templates: 0,
+        blockedIds: [],
+      })
+      mockExpenseRecordDB.findById.mockResolvedValue({
+        id: 'f2',
+        description: 'Internet',
+        amount: 99,
+        personId: 'me',
+        categoryId: 'cat1',
+        paymentMonth: 10,
+        paymentYear: 2026,
+        dueDate: new Date('2026-10-12T00:00:00Z'),
+      })
+      mockExpenseRecordDB.create.mockImplementation(async (_resource, data) => ({
+        id: 'r1',
+        ...data,
+        sharedWith: null,
+      }))
+
+      const template = (await service.recurringFromSeries(ExpenseResource.FIXED_COST, 'f1')) as Record<string, unknown>
+
+      expect(mockExpenseRecordDB.findById).toHaveBeenCalledWith(ExpenseResource.FIXED_COST, 'f2')
+      expect(mockExpenseRecordDB.create).toHaveBeenCalledWith(
+        ExpenseResource.RECURRING,
+        expect.objectContaining({ description: 'Internet', targetType: 'fixed_cost', dayOfMonth: 12 }),
+      )
+      expect(template.id).toBe('r1')
+    })
+
+    it('should refuse a series that already has a template', async () => {
+      mockExpenseRecordDB.findSeries.mockResolvedValue({ rows: [{ id: 'f1' }], templates: 1, blockedIds: [] })
+      await expect(service.recurringFromSeries(ExpenseResource.FIXED_COST, 'f1')).rejects.toBeInstanceOf(
+        RecurringTemplateExistsException,
+      )
+      expect(mockExpenseRecordDB.create).not.toHaveBeenCalled()
     })
   })
 })

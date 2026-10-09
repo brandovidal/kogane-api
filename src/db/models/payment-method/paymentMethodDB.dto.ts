@@ -1,6 +1,10 @@
 import { PaymentMethod } from '@/generated/prisma/client'
 
-export type PaymentMethodDbDto = Omit<PaymentMethod, 'aliases'> & { aliases: string[] }
+// The statement password never leaves the repository: only whether there is one
+export type PaymentMethodDbDto = Omit<PaymentMethod, 'aliases' | 'statementPassword'> & {
+  aliases: string[]
+  hasStatementPassword: boolean
+}
 
 export interface PaymentMethodWriteDbDto {
   name: string

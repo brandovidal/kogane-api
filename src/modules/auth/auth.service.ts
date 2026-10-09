@@ -20,6 +20,7 @@ import { UserNotFoundException } from '@/commons/exceptions/auth/user-not-found.
 import { InvalidCredentialsException } from '@/commons/exceptions/auth/invalid-credentials.exception'
 import { InviteInvalidException } from '@/commons/exceptions/auth/invite-invalid.exception'
 import { LinkCodeInvalidException } from '@/commons/exceptions/auth/link-code-invalid.exception'
+import { ResetLinkInvalidException } from '@/commons/exceptions/auth/reset-link-invalid.exception'
 import { NotInvitedException } from '@/commons/exceptions/auth/not-invited.exception'
 import { TooManyAttemptsException } from '@/commons/exceptions/auth/too-many-attempts.exception'
 import { UserDisabledException } from '@/commons/exceptions/auth/user-disabled.exception'
@@ -115,6 +116,27 @@ export class AuthService {
       throw new InvalidCredentialsException()
     if (next.length < MIN_PASSWORD_LENGTH) throw new WeakPasswordException()
     await this.authDBRepository.updateUser(userId, { passwordHash: await hashPassword(next) })
+  }
+
+  // "¿Olvidaste tu contraseña?": the one-use link proves the email (like an invitation); every session of the account
+  // is closed and the new one starts here
+  async resetPassword(input: { token: string; password: string }) {
+    if (input.password.length < MIN_PASSWORD_LENGTH) throw new WeakPasswordException()
+    const token = await this.authDBRepository.consumeToken(
+      AuthTokenKind.PASSWORD_RESET,
+      hashToken(input.token),
+      new Date(),
+    )
+    const user = token?.userId ? await this.authDBRepository.findUserById(token.userId) : null
+    if (!user) throw new ResetLinkInvalidException()
+    if (user.status === UserStatus.DISABLED) throw new UserDisabledException()
+    await this.revokeSessionsOf(user.id)
+    const updated = await this.authDBRepository.updateUser(user.id, {
+      passwordHash: await hashPassword(input.password),
+      status: UserStatus.ACTIVE,
+    })
+    await this.authDBRepository.clearAttempts(updated.email)
+    return this.startSession(updated)
   }
 
   // ==================== Invitations ====================

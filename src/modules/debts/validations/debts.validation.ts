@@ -1,3 +1,4 @@
+import { yearMonthSchema } from '@/commons/helpers/period-range.helper'
 import { z } from 'zod'
 
 import { DebtDirection, DebtPaymentKind, DebtStatus, DebtTiming } from '@/commons/constants/debt.constant'
@@ -20,6 +21,8 @@ export const debtListQuerySchema = z.object({
   month: month.optional(),
   year: year.optional(),
   until: z.stringbool().optional().describe('With month and year: that month and every earlier one'),
+  from: yearMonthSchema.optional().describe('First payment month of a range (YYYY-MM); ignored with month and year'),
+  to: yearMonthSchema.optional().describe('Last payment month of a range (YYYY-MM); ignored with month and year'),
   paymentMethodId: z.string().min(1).optional().describe('The card the debts were charged on (D114)'),
 })
 
@@ -27,6 +30,8 @@ export const debtSummaryQuerySchema = z.object({
   month: month.optional(),
   year: year.optional(),
   until: z.stringbool().optional(),
+  from: yearMonthSchema.optional().describe('First payment month of a range (YYYY-MM)'),
+  to: yearMonthSchema.optional().describe('Last payment month of a range (YYYY-MM)'),
 })
 
 const debtFields = {
@@ -81,6 +86,12 @@ export const debtResponseSchema = z.object({
   installment: z.string().nullable(),
   paymentMonth: z.number().int(),
   paymentYear: z.number().int(),
+  carriedFromMonth: z
+    .number()
+    .int()
+    .nullable()
+    .describe('Carried to this month from that payment month ("Arrastrada de …")'),
+  carriedFromYear: z.number().int().nullable(),
   dueDate: dateTimeSchema.nullable(),
   status: z.enum(DebtStatus),
   paidAmount: z.number(),
@@ -112,6 +123,10 @@ export const debtPaymentResponseSchema = z.object({
   confirmedAt: dateTimeSchema.nullable(),
   notes: z.string().nullable(),
   createdAt: dateTimeSchema,
+})
+
+export const debtPaymentCreatedResponseSchema = debtResponseSchema.extend({
+  paymentId: z.string().describe('The new payment: attach its Comprobante with refType debt_payment'),
 })
 
 export const debtDetailResponseSchema = debtViewResponseSchema.extend({ payments: z.array(debtPaymentResponseSchema) })
@@ -165,6 +180,23 @@ export const debtBulkResponseSchema = z.object({
   paid: z.number().describe('Amount registered as payments'),
   excess: z.number().describe('partial: what was left over after every balance'),
   skipped: z.array(z.string()).describe('Debts left out: already paid, or with payments on delete without force'),
+})
+
+// "Arrastrar saldos pendientes al mes en curso": the open installments of earlier months move to the target month,
+// remembering where they came from (carriedFrom…, the first time only)
+export const debtCarryOverSchema = z.object({
+  month: z.number().int().min(1).max(12).describe('The target month (usually the current one)'),
+  year: z.number().int().min(2000).max(2100),
+  direction: z.enum(DebtDirection).optional().describe('Only cobros (owed_to_me) or only deudas (i_owe)'),
+  personId: z.string().min(1).optional(),
+  dryRun: z.boolean().optional().describe('Only count what would be carried (the confirmation of the dialog)'),
+})
+
+export const debtCarryOverResponseSchema = z.object({
+  dryRun: z.boolean(),
+  affected: z.number().int().describe('Installments carried (or that would be)'),
+  balance: z.number().describe('Their open balance in soles'),
+  ids: z.array(z.string()),
 })
 
 // Contraste con la tarjeta (D114): what each person owes on a card in a month vs what the statement billed

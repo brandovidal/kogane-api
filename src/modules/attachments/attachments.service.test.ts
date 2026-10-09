@@ -1,11 +1,13 @@
 import { Test, TestingModule } from '@nestjs/testing'
 import { vi } from 'vitest'
 
-import { AttachmentRefType, MAX_ATTACHMENT_BYTES } from '@/commons/constants/commitment.constant'
+import { AttachmentKind, AttachmentRefType, MAX_ATTACHMENT_BYTES } from '@/commons/constants/commitment.constant'
 import { AttachmentInvalidException } from '@/commons/exceptions/commitment/attachment-invalid.exception'
 import { AttachmentNotFoundException } from '@/commons/exceptions/commitment/attachment-not-found.exception'
+import { DebtNotFoundException } from '@/commons/exceptions/debt/debt-not-found.exception'
 import { ExpenseNotFoundException } from '@/commons/exceptions/expense/expense-not-found.exception'
 import { AttachmentDBRepository } from '@/db/models/attachment/attachmentDB.repository'
+import { DebtDBRepository } from '@/db/models/debt/debtDB.repository'
 import { CommitmentDBRepository } from '@/db/models/commitment/commitmentDB.repository'
 import { ExpenseRecordDBRepository, ExpenseResource } from '@/db/models/expense-record/expenseRecordDB.repository'
 import { StoredFilesService } from '@/modules/stored-files/stored-files.service'
@@ -22,6 +24,7 @@ const mockAttachments = {
 }
 const mockCommitments = { findById: vi.fn(), findContribution: vi.fn() }
 const mockExpenses = { exists: vi.fn() }
+const mockDebts = { findPayment: vi.fn() }
 const mockStoredFiles = { storeAttachment: vi.fn(), release: vi.fn(), signedUrl: vi.fn() }
 
 const PDF = { buffer: Buffer.from('pdf'), mimetype: 'application/pdf', originalname: 'recibo-03.pdf' }
@@ -36,6 +39,7 @@ describe('AttachmentsService', () => {
         AttachmentsService,
         { provide: AttachmentDBRepository, useValue: mockAttachments },
         { provide: CommitmentDBRepository, useValue: mockCommitments },
+        { provide: DebtDBRepository, useValue: mockDebts },
         { provide: ExpenseRecordDBRepository, useValue: mockExpenses },
         { provide: StoredFilesService, useValue: mockStoredFiles },
       ],
@@ -102,6 +106,29 @@ describe('AttachmentsService', () => {
       mockExpenses.exists.mockReset().mockResolvedValueOnce(false).mockResolvedValueOnce(true)
       await service.upload({ refType: AttachmentRefType.EXPENSE, refId: 'e1' }, PDF)
       expect(mockExpenses.exists).toHaveBeenCalledTimes(2)
+    })
+  })
+
+  describe('debt payment Comprobante', () => {
+    it('should keep the Comprobante of a cobro or debt payment in debts/ as a factura or any kind', async () => {
+      mockDebts.findPayment.mockResolvedValue({ id: 'pay1' })
+      await service.upload(
+        { refType: AttachmentRefType.DEBT_PAYMENT, refId: 'pay1', kind: AttachmentKind.INVOICE },
+        PDF,
+      )
+
+      expect(mockStoredFiles.storeAttachment).toHaveBeenCalledWith('debts', PDF.buffer, 'application/pdf')
+      expect(mockAttachments.create).toHaveBeenCalledWith(
+        expect.objectContaining({ refType: 'debt_payment', refId: 'pay1', kind: 'factura' }),
+      )
+    })
+
+    it('should not attach to a payment that does not exist', async () => {
+      mockDebts.findPayment.mockResolvedValue(null)
+      await expect(service.upload({ refType: AttachmentRefType.DEBT_PAYMENT, refId: 'nope' }, PDF)).rejects.toThrow(
+        DebtNotFoundException,
+      )
+      expect(mockStoredFiles.storeAttachment).not.toHaveBeenCalled()
     })
   })
 

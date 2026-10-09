@@ -6,6 +6,7 @@ import { LEGACY_OWNER_ID, UserRole, UserStatus } from '@/commons/constants/auth.
 import { InvalidCredentialsException } from '@/commons/exceptions/auth/invalid-credentials.exception'
 import { InviteInvalidException } from '@/commons/exceptions/auth/invite-invalid.exception'
 import { LinkCodeInvalidException } from '@/commons/exceptions/auth/link-code-invalid.exception'
+import { ResetLinkInvalidException } from '@/commons/exceptions/auth/reset-link-invalid.exception'
 import { NotInvitedException } from '@/commons/exceptions/auth/not-invited.exception'
 import { TooManyAttemptsException } from '@/commons/exceptions/auth/too-many-attempts.exception'
 import { UserDisabledException } from '@/commons/exceptions/auth/user-disabled.exception'
@@ -366,6 +367,46 @@ describe('AuthService', () => {
 
       mockDB.findUserById.mockResolvedValueOnce(user({ id: 'u2' }))
       expect(await service.chatIdsOf('u2')).toEqual([])
+    })
+  })
+
+  describe('resetPassword', () => {
+    it('should use up the emailed link, set the password, close the other sessions and sign in', async () => {
+      mockDB.consumeToken.mockResolvedValueOnce({ userId: 'u1' })
+      mockDB.findUserById.mockResolvedValueOnce(user({ passwordHash: 'old' }))
+
+      const { user: signedIn, token } = await service.resetPassword({
+        token: 'tok-1234567890',
+        password: 'nueva-clave-segura',
+      })
+
+      expect(mockDB.consumeToken).toHaveBeenCalledWith('password_reset', hashToken('tok-1234567890'), expect.any(Date))
+      expect(mockDB.deleteSessionsOf).toHaveBeenCalledWith('u1')
+      expect(mockDB.updateUser).toHaveBeenCalledWith(
+        'u1',
+        expect.objectContaining({ passwordHash: expect.any(String) }),
+      )
+      expect(mockDB.clearAttempts).toHaveBeenCalledWith('brando@example.com')
+      expect(signedIn.id).toBe('u1')
+      expect(token).toBeTruthy()
+    })
+
+    it('should refuse a used or unknown link and a short password', async () => {
+      await expect(service.resetPassword({ token: 'tok-1234567890', password: 'corta' })).rejects.toBeInstanceOf(
+        WeakPasswordException,
+      )
+      mockDB.consumeToken.mockResolvedValueOnce(null)
+      await expect(
+        service.resetPassword({ token: 'tok-1234567890', password: 'nueva-clave-segura' }),
+      ).rejects.toBeInstanceOf(ResetLinkInvalidException)
+    })
+
+    it('should not reopen a disabled account', async () => {
+      mockDB.consumeToken.mockResolvedValueOnce({ userId: 'u1' })
+      mockDB.findUserById.mockResolvedValueOnce(user({ status: UserStatus.DISABLED }))
+      await expect(
+        service.resetPassword({ token: 'tok-1234567890', password: 'nueva-clave-segura' }),
+      ).rejects.toBeInstanceOf(UserDisabledException)
     })
   })
 })

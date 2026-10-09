@@ -6,7 +6,9 @@ import { ApiRest } from '@/commons/decorators/api-rest.decorator'
 import { ResponseMessage } from '@/commons/decorators/response-message.decorator'
 import { DateHelper } from '@/commons/helpers/date.helper'
 
-import { GenerateRecurringDto } from './dto/request/recurring-expenses.dto'
+import { GenerateRecurringDto, RecurringFromSeriesDto } from './dto/request/recurring-expenses.dto'
+import { ExpenseRecordResponseDto } from './dto/response/expenses-response.dto'
+import { ExpensesService } from './expenses.service'
 import { RecurringGenerationResponseDto } from './dto/response/recurring-expenses-response.dto'
 import { RecurringExpensesService } from './recurring-expenses.service'
 
@@ -14,7 +16,21 @@ import { RecurringExpensesService } from './recurring-expenses.service'
 @ApiRest('expenses')
 @Controller('recurring-expenses')
 export class RecurringExpensesController {
-  constructor(private readonly recurringExpensesService: RecurringExpensesService) {}
+  constructor(
+    private readonly recurringExpensesService: RecurringExpensesService,
+    private readonly expensesService: ExpensesService,
+  ) {}
+
+  @Post('from-series')
+  @ApiOperation({
+    summary:
+      '"Pasar desde Costos fijos… / Plataformas…": a monthly template from a series (409 RECURRING_TEMPLATE_EXISTS)',
+  })
+  @ApiOkResponse({ type: ExpenseRecordResponseDto })
+  @ResponseMessage('RECURRING_FROM_SERIES', 'Recurring template created')
+  fromSeries(@Body() { resource, id }: RecurringFromSeriesDto) {
+    return this.expensesService.recurringFromSeries(resource, id)
+  }
 
   @Post('generate')
   @HttpCode(HttpStatus.OK)

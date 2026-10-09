@@ -480,9 +480,10 @@ export class NotionImporter {
     }
     const catalog = buildExtractionCatalog({
       people: people.map((person) => ({ ...person, aliases: aliases(person.aliases) })) as PersonDbDto[],
-      paymentMethods: paymentMethods.map((method) => ({
+      paymentMethods: paymentMethods.map(({ statementPassword, ...method }) => ({
         ...method,
         aliases: aliases(method.aliases),
+        hasStatementPassword: !!statementPassword,
       })) as PaymentMethodDbDto[],
       categories,
     })

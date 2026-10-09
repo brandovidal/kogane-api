@@ -1,6 +1,6 @@
 import { PaymentStatus, SubscriptionKind, SubscriptionPeriod } from '@/commons/constants/expense.constant'
 
-import { convertRow } from './expense-move.helper'
+import { convertRow, copyRow, rowsFrom } from './expense-move.helper'
 
 const due = new Date('2026-09-05T00:00:00.000Z')
 const attention = new Date('2026-09-03T00:00:00.000Z')
@@ -73,6 +73,63 @@ describe('convertRow (D106)', () => {
       id: 'sub-3',
       period: SubscriptionPeriod.ANNUAL,
       kind: SubscriptionKind.ANNUAL,
+    })
+  })
+
+  describe('copyRow', () => {
+    it('should write a new unpaid row without id, draft, Notion key or shares, keeping description, amount and month', () => {
+      const copy = copyRow(
+        {
+          id: 'fc1',
+          userId: 'u1',
+          description: 'Netflix',
+          amount: 44.9,
+          othersShare: 22.45,
+          paymentStatus: PaymentStatus.PAID,
+          paymentDate: new Date('2026-09-05'),
+          paymentMonth: 9,
+          paymentYear: 2026,
+          draftId: 'd1',
+          importKey: 'k1',
+          attentionDate: null,
+          commitmentId: null,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+        'fixedCost',
+        'subscription',
+        { kind: SubscriptionKind.PLATFORM },
+      )
+
+      expect(copy).toEqual(
+        expect.objectContaining({
+          description: 'Netflix',
+          amount: 44.9,
+          othersShare: 0,
+          paymentStatus: PaymentStatus.NOT_STARTED,
+          paymentDate: null,
+          paymentMonth: 9,
+          paymentYear: 2026,
+          kind: SubscriptionKind.PLATFORM,
+          period: SubscriptionPeriod.MONTHLY,
+        }),
+      )
+      for (const column of ['id', 'userId', 'draftId', 'importKey', 'createdAt', 'updatedAt', 'commitmentId']) {
+        expect(copy).not.toHaveProperty(column)
+      }
+    })
+  })
+
+  describe('rowsFrom', () => {
+    const rows = [
+      { paymentMonth: 11, paymentYear: 2025 },
+      { paymentMonth: 1, paymentYear: 2026 },
+      { paymentMonth: 2, paymentYear: 2026 },
+    ]
+
+    it('should keep the rows from that payment month on, crossing years', () => {
+      expect(rowsFrom(rows, { month: 1, year: 2026 })).toEqual(rows.slice(1))
+      expect(rowsFrom(rows, null)).toEqual(rows)
     })
   })
 })

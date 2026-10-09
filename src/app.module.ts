@@ -12,6 +12,7 @@ import { ExpensesModule } from '@/modules/expenses/expenses.module'
 import { DraftsModule } from '@/modules/drafts/drafts.module'
 import { MessagesModule } from '@/modules/messages/messages.module'
 import { SummaryModule } from '@/modules/summary/summary.module'
+import { PersonSummariesModule } from '@/modules/person-summaries/person-summaries.module'
 import { DebtsModule } from '@/modules/debts/debts.module'
 import { BudgetModule } from '@/modules/budget/budget.module'
 import { ReportsModule } from '@/modules/reports/reports.module'
@@ -42,6 +43,7 @@ import { CommitmentsModule } from '@/modules/commitments/commitments.module'
     DraftsModule,
     MessagesModule,
     SummaryModule,
+    PersonSummariesModule,
     DebtsModule,
     BudgetModule,
     ReportsModule,

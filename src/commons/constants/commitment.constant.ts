@@ -25,6 +25,7 @@ export enum AttachmentKind {
   BOLETA = 'boleta',
   RECEIPT = 'recibo',
   CONTRACT = 'contrato',
+  INVOICE = 'factura',
   OTHER = 'otro',
 }
 
@@ -33,6 +34,7 @@ export enum AttachmentRefType {
   FIXED_COST = 'fixed_cost', // an installment of a loan
   CONTRIBUTION = 'contribution',
   EXPENSE = 'expense', // daily, card or subscription expense: refId is its id, area expenses/
+  DEBT_PAYMENT = 'debt_payment', // the Comprobante of a cobro or debt payment: refId is the payment id, area debts/
 }
 
 // Folder of each area inside <env>/finance/ (D100)
@@ -41,6 +43,7 @@ export const ATTACHMENT_FOLDERS: Record<AttachmentRefType, string> = {
   [AttachmentRefType.FIXED_COST]: 'commitments',
   [AttachmentRefType.CONTRIBUTION]: 'investments',
   [AttachmentRefType.EXPENSE]: 'expenses',
+  [AttachmentRefType.DEBT_PAYMENT]: 'debts',
 }
 
 export const MAX_ATTACHMENT_BYTES = 15 * 1024 * 1024

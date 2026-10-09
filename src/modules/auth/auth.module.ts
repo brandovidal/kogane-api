@@ -9,6 +9,7 @@ import { AdminController } from './admin.controller'
 import { AuthController } from './auth.controller'
 import { AuthService } from './auth.service'
 import { GoogleOAuthService } from './google-oauth.service'
+import { PasswordResetService } from './password-reset.service'
 import { UserProvisioningService } from './user-provisioning.service'
 import { UsersController } from './users.controller'
 import { UsersService } from './users.service'
@@ -21,6 +22,7 @@ import { UsersService } from './users.service'
   providers: [
     AuthService,
     GoogleOAuthService,
+    PasswordResetService,
     UsersService,
     UserProvisioningService,
     { provide: APP_INTERCEPTOR, useClass: TenantInterceptor },

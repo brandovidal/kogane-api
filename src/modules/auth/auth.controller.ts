@@ -17,9 +17,11 @@ import { AuthService, toSessionUser } from './auth.service'
 import {
   AcceptInviteDto,
   ChangePasswordDto,
+  ForgotPasswordDto,
   GoogleCallbackQueryDto,
   GoogleStartQueryDto,
   LoginDto,
+  ResetPasswordDto,
 } from './dto/request/auth.dto'
 import {
   AuthConfigResponseDto,
@@ -29,6 +31,7 @@ import {
   TelegramLinkResponseDto,
 } from './dto/response/auth-response.dto'
 import { GoogleOAuthService } from './google-oauth.service'
+import { PasswordResetService } from './password-reset.service'
 
 const SESSION_SECONDS = SESSION_DAYS * 24 * 60 * 60
 type AuthedRequest = Request & { user: AuthUser }
@@ -43,6 +46,7 @@ export class AuthController {
     private readonly googleOAuthService: GoogleOAuthService,
     private readonly configService: ConfigService,
     private readonly mailService: MailService,
+    private readonly passwordResetService: PasswordResetService,
   ) {}
 
   private get secure(): boolean {
@@ -128,6 +132,33 @@ export class AuthController {
   @ResponseMessage('INVITE_ACCEPTED', 'Invitation accepted')
   async acceptInvite(@Body() body: AcceptInviteDto, @Res({ passthrough: true }) res: Response) {
     const { user, token } = await this.authService.acceptInvite(body)
+    this.setSession(res, token)
+    return toSessionUser(user)
+  }
+
+  @Public()
+  @Post('forgot-password')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      '"¿Olvidaste tu contraseña?": emails a one-use link (60 minutes). Same answer whether the email exists or not',
+  })
+  @ApiOkResponse({ type: EmptyResponseDto })
+  @ResponseMessage('PASSWORD_RESET_REQUESTED', 'If the email has an account, a link was sent')
+  async forgotPassword(@Body() body: ForgotPasswordDto) {
+    await this.passwordResetService.request(body.email)
+  }
+
+  @Public()
+  @Post('reset-password')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Choose a new password with the emailed link (410 RESET_LINK_INVALID); other sessions are closed',
+  })
+  @ApiOkResponse({ type: SessionUserResponseDto })
+  @ResponseMessage('PASSWORD_RESET', 'Password changed')
+  async resetPassword(@Body() body: ResetPasswordDto, @Res({ passthrough: true }) res: Response) {
+    const { user, token } = await this.authService.resetPassword(body)
     this.setSession(res, token)
     return toSessionUser(user)
   }

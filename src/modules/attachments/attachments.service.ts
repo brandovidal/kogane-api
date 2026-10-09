@@ -1,3 +1,5 @@
+import { DebtNotFoundException } from '@/commons/exceptions/debt/debt-not-found.exception'
+import { DebtDBRepository } from '@/db/models/debt/debtDB.repository'
 import { Injectable, Logger } from '@nestjs/common'
 
 import {
@@ -40,6 +42,7 @@ export class AttachmentsService {
   constructor(
     private readonly attachmentDBRepository: AttachmentDBRepository,
     private readonly commitmentDBRepository: CommitmentDBRepository,
+    private readonly debtDBRepository: DebtDBRepository,
     private readonly expenseRecordDBRepository: ExpenseRecordDBRepository,
     private readonly storedFilesService: StoredFilesService,
   ) {}
@@ -114,6 +117,10 @@ export class AttachmentsService {
   private async assertRefExists(refType: AttachmentRefType, refId: string): Promise<ExpenseResource | undefined> {
     if (refType === AttachmentRefType.COMMITMENT) {
       await this.commitmentDBRepository.findById(refId)
+      return
+    }
+    if (refType === AttachmentRefType.DEBT_PAYMENT) {
+      if (!(await this.debtDBRepository.findPayment(refId))) throw new DebtNotFoundException({ paymentId: refId })
       return
     }
     if (refType === AttachmentRefType.CONTRIBUTION) {
