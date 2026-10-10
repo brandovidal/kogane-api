@@ -46,3 +46,27 @@ export function convertRow(row: Row, from: MovableTable, to: MovableTable, targe
   }
   return data
 }
+
+// Columns a copy never keeps: it is a new row, unpaid, with nothing linked (draft, Notion row, cobros)
+const NOT_COPIED = ['id', 'userId', 'draftId', 'importKey', 'createdAt', 'updatedAt', 'commitmentId']
+
+// "Copiar" of Transferir: the same row written for the other table (or the same one) as a new, unpaid row. Shares are
+// not copied: a copy creates no cobros, so it starts as the user's own expense
+export function copyRow(row: Row, from: MovableTable, to: MovableTable, target: MoveTarget = {}): Row {
+  const data = convertRow(row, from, to, target)
+  for (const column of NOT_COPIED) delete data[column]
+  data.paymentStatus = PaymentStatus.NOT_STARTED
+  data.paymentDate = null
+  data.othersShare = 0
+  return data
+}
+
+// The rows of a series from a payment month on ("Desde el mes"); every row without one
+export function rowsFrom<T extends { paymentMonth: number; paymentYear: number }>(
+  rows: T[],
+  from: { month: number; year: number } | null | undefined,
+): T[] {
+  if (!from) return rows
+  const start = from.year * 12 + from.month
+  return rows.filter((row) => row.paymentYear * 12 + row.paymentMonth >= start)
+}

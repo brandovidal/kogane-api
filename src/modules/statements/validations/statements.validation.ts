@@ -11,6 +11,7 @@ export const uploadStatementSchema = z.object({
   personId: z.string().min(1).optional(),
   // multipart sends "true"; the password is saved only if it opened the PDF (D94)
   savePassword: z.stringbool().optional(),
+  saveCardPassword: z.stringbool().optional(),
 })
 
 const updateStatementBalanceSchema = z
@@ -171,4 +172,8 @@ export const statementSummaryResponseSchema = z.object({
     created: z.number().int(),
     ignored: z.number().int(),
   }),
+})
+
+export const statementFileSchema = z.object({
+  url: z.string().nullable().describe('Signed link to the PDF (10 minutes); null when the file was not kept'),
 })

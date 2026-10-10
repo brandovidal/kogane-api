@@ -1,5 +1,7 @@
 import { z } from 'zod'
 
+import { ListImportTarget } from '../list/list-csv.mapper'
+
 import {
   IMPORT_PAGE_SIZE,
   ImportBatchStatus,
@@ -86,4 +88,30 @@ export const applyImportResponseSchema = z.object({
   payments: z.number().int(),
   groups: z.number().int(),
   budgets: z.number().int(),
+})
+
+// "Importar … (CSV)" of the ⋯ menu of each list: preview first, apply=true creates the ready rows
+export const listImportQuerySchema = z.object({
+  target: z
+    .enum(ListImportTarget)
+    .describe('The list: daily-expenses, platforms, recurring-expenses, receivables or payables'),
+  apply: z.stringbool().optional().describe('Create the ready rows; without it only a preview'),
+})
+
+export const listImportResponseSchema = z.object({
+  target: z.enum(ListImportTarget),
+  applied: z.boolean(),
+  total: z.number().int(),
+  ready: z.number().int().describe('Rows that would be created (preview)'),
+  created: z.number().int().describe('Rows created (apply)'),
+  withIssues: z.number().int(),
+  rows: z.array(
+    z.object({
+      line: z.number().int().describe('Line of the CSV (the header is 1)'),
+      description: z.string().nullable(),
+      amount: z.number().nullable(),
+      status: z.enum(['ready', 'issue', 'created']),
+      issues: z.array(z.string()).describe('In Spanish, as the preview shows them'),
+    }),
+  ),
 })

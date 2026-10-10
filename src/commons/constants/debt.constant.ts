@@ -42,3 +42,10 @@ export const DEBT_PAYMENT_PROPOSAL_MINUTES = 30
 
 // Rounding of money: installments and balances in cents
 export const toCents = (amount: number) => Math.round(amount * 100) / 100
+
+// Resumen by person and month (board ResSheet / ResEstado*): a month without a row is a draft
+export enum PersonSummaryStatus {
+  DRAFT = 'draft', // Borrador: the month is still running, totals move with every expense
+  IN_PROGRESS = 'in_progress', // En progreso: closed and sent, collecting
+  PAID = 'paid', // Pagado: everything collected
+}

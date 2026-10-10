@@ -52,10 +52,15 @@ const mockStatementDB = {
   changeCard: vi.fn(),
   delete: vi.fn(),
 }
-const mockPaymentMethods = { findAll: vi.fn(), findById: vi.fn() }
+const mockPaymentMethods = {
+  findAll: vi.fn(),
+  findById: vi.fn(),
+  findStatementPasswords: vi.fn(),
+  setStatementPassword: vi.fn(),
+}
 const mockPeople = { findDefault: vi.fn(), findActive: vi.fn(), update: vi.fn() }
 const mockExtraction = { generateStructured: vi.fn() }
-const mockFiles = { storeTemporary: vi.fn(), keep: vi.fn() }
+const mockFiles = { storeTemporary: vi.fn(), keep: vi.fn(), signedUrl: vi.fn() }
 const mockNotifications = { notify: vi.fn() }
 const mockHolders = { findByCard: vi.fn() }
 
@@ -91,6 +96,7 @@ describe('StatementsService', () => {
     mockPeople.findActive.mockResolvedValue([{ id: 'me', name: 'Brando', aliases: [] }])
     mockPaymentMethods.findAll.mockResolvedValue([OH, { id: 'yape', type: 'wallet', code: null }])
     mockPaymentMethods.findById.mockResolvedValue(OH)
+    mockPaymentMethods.findStatementPasswords.mockResolvedValue([])
     mockStatementDB.findCardExpenses.mockResolvedValue([
       {
         id: 'e1',
@@ -521,6 +527,17 @@ describe('StatementsService', () => {
     })
   })
 
+  it('should give a signed link to the PDF of a statement, or null when it was not kept', async () => {
+    mockStatementDB.findById.mockResolvedValueOnce({ ...saved([]), fileId: 'f1' })
+    mockFiles.signedUrl.mockResolvedValueOnce('https://signed/f1')
+    expect(await service.fileUrl('s1')).toEqual({ url: 'https://signed/f1' })
+    expect(mockFiles.signedUrl).toHaveBeenCalledWith('f1')
+
+    mockStatementDB.findById.mockResolvedValueOnce({ ...saved([]), fileId: null })
+    mockFiles.signedUrl.mockResolvedValueOnce(null)
+    expect(await service.fileUrl('s1')).toEqual({ url: null })
+  })
+
   it('should rename a row (empty goes back to the bank text) or ignore it', async () => {
     mockStatementDB.findById.mockResolvedValue(saved([]))
     await service.updateRow('s1', 'r1', { label: '' })
@@ -575,6 +592,40 @@ describe('StatementsService', () => {
 
       expect(mockPeople.update).toHaveBeenCalledTimes(1)
       expect(mockPeople.update).toHaveBeenCalledWith('dany', { documentNumber: '99887766' })
+    })
+
+    it("should try the chosen card's saved password first and every card password after the people (I12)", async () => {
+      const ioKey = ['io', 'key'].join('-')
+      const ohKey = ['oh', 'key'].join('-')
+      mockPaymentMethods.findStatementPasswords.mockResolvedValue([
+        { id: 'io', password: ioKey },
+        { id: 'oh', password: ohKey },
+      ])
+      vi.mocked(readPdfLines).mockImplementation(async (_data, password) => {
+        if (password !== ioKey) throw passwordError()
+        return SIP_LINES
+      })
+
+      await service.upload({ data: Buffer.from('pdf'), paymentMethodId: 'oh' })
+      expect(vi.mocked(readPdfLines).mock.calls.map(([, password]) => password)).toEqual([
+        ohKey,
+        '44556677',
+        '70112233',
+        ioKey,
+      ])
+    })
+
+    it('should keep the typed password on the card only when asked and when it opened the PDF (I12)', async () => {
+      vi.mocked(readPdfLines).mockImplementation(async (_data, password) => {
+        if (password !== 'clave-oh') throw passwordError()
+        return SIP_LINES
+      })
+
+      await service.upload({ data: Buffer.from('pdf'), password: 'clave-oh', saveCardPassword: true })
+      await service.upload({ data: Buffer.from('pdf'), password: 'clave-oh' })
+
+      expect(mockPaymentMethods.setStatementPassword).toHaveBeenCalledTimes(1)
+      expect(mockPaymentMethods.setStatementPassword).toHaveBeenCalledWith('oh', 'clave-oh')
     })
 
     it('should give the statement to the holder it names, and to the chosen person over anything else', async () => {

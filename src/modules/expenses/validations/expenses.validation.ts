@@ -1,3 +1,4 @@
+import { yearMonthSchema } from '@/commons/helpers/period-range.helper'
 import { z } from 'zod'
 
 import {
@@ -116,6 +117,8 @@ export const EXPENSE_SCHEMAS = {
 export const expenseListQuerySchema = z.object({
   month: z.coerce.number().int().min(1).max(12).optional(),
   year: z.coerce.number().int().min(2020).max(2100).optional(),
+  from: yearMonthSchema.optional().describe('First month of a range (YYYY-MM, included); ignored with month and year'),
+  to: yearMonthSchema.optional().describe('Last month of a range (YYYY-MM, included); ignored with month and year'),
   personId: z.string().min(1).optional(),
   paymentMethodId: z.string().min(1).optional(),
   kind: z
@@ -187,6 +190,7 @@ export const EXPENSE_RESPONSE_SCHEMAS = {
     ...paidInMonth,
     paymentMethodId: z.string(),
     processDate: nullableDate,
+    reviewedAt: nullableDate.describe('"Marcar como revisados": when it was checked against the statement'),
     originDraftId: z.string().nullable().describe('The draft that also created this installment (D73)'),
   }),
   [ExpenseResource.RECURRING]: z.object({

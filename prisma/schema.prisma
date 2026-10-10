@@ -40,6 +40,7 @@ model Person {
   recurringExpenses  RecurringExpense[]
   cardHolders        CardHolder[]
   commitments        Commitment[]
+  personSummaries    PersonSummary[]
 
   @@unique([userId, name])
   @@index([userId])
@@ -66,6 +67,7 @@ model PaymentMethod {
   paymentDueDay        Int? // credit cards only
   supportsAmortization Boolean  @default(false) // special debt payment available with this credit card (D114)
   supportsCashback     Boolean  @default(false) // statement cashback available with this credit card (D114)
+  statementPassword    String? // the password of its statement PDFs (I12): kept whole like the DNI (D94), never answered
   color                String?
   createdAt            DateTime @default(now())
   updatedAt            DateTime @updatedAt
@@ -559,6 +561,7 @@ model CreditCardExpense {
   paymentMonth    Int
   paymentYear     Int
   processDate     DateTime?
+  reviewedAt      DateTime? // "Marcar como revisados" of Tarjetas: checked against the statement
   notes           String?
   originDraftId   String? // the draft that also created this row (installments after the first, D73)
   tripId          String? // the trip that was open when it was saved (/viaje, P18, D128)
@@ -593,6 +596,8 @@ model Debt {
   installment     String? // "n/m"
   paymentMonth    Int
   paymentYear     Int
+  carriedFromMonth Int? // "Arrastrar saldos pendientes": the payment month it had before it was first carried
+  carriedFromYear  Int?
   dueDate         DateTime?
   status          String         @default("pending") // DebtStatus
   paidAmount      Float          @default(0)
@@ -618,6 +623,29 @@ model Debt {
   @@index([paymentMethodId, paymentYear, paymentMonth])
   @@index([userId])
   @@map("exp_debts")
+}
+
+// Resumen by person and month (board ResSheet): Borrador → En progreso → Pagado, the cutoff date, until when to
+// collect, a note and manual adjustments (JSON [{ description, amount }], positive = they owe more). A month without a
+// row is a draft: the totals always come from the debts, this only keeps what the user decides about them
+model PersonSummary {
+  id          String    @id @default(cuid())
+  userId      String? // whose row it is (P23, D82): set and filtered by the tenancy extension
+  personId    String
+  person      Person    @relation(fields: [personId], references: [id], onDelete: Cascade)
+  month       Int
+  year        Int
+  status      String    @default("draft") // PersonSummaryStatus
+  cutoffDate  DateTime? // fecha de corte: what is charged up to this day
+  collectBy   DateTime? // fecha límite de cobro
+  note        String?
+  adjustments String    @default("[]")
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@unique([userId, personId, year, month])
+  @@index([userId, year, month])
+  @@map("exp_person_summaries")
 }
 
 // A payment towards one installment. From the bot it starts as a proposal (confirmedAt null) grouped by batchId,

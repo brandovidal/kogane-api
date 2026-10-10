@@ -1,6 +1,7 @@
 import { z } from 'zod'
 
 import { RecurringTargetType } from '@/commons/constants/expense.constant'
+import { ExpenseResource } from '@/db/models/expense-record/expenseRecordDB.repository'
 
 // Without month and year: the current month (America/Lima)
 export const generateRecurringSchema = z
@@ -10,6 +11,12 @@ export const generateRecurringSchema = z
   })
   .partial()
   .refine(({ month, year }) => (month == null) === (year == null), { message: 'month and year go together' })
+
+// "Pasar desde Costos fijos… / Plataformas…": the row whose series becomes a monthly template
+export const recurringFromSeriesSchema = z.object({
+  resource: z.enum([ExpenseResource.FIXED_COST, ExpenseResource.SUBSCRIPTION]),
+  id: z.string().min(1).describe('Any row of the series (same description and person); its latest row is copied'),
+})
 
 // ==================== Responses (Swagger / kogane-app types) ====================
 

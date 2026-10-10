@@ -8,6 +8,8 @@ import { ResponseMessage } from '@/commons/decorators/response-message.decorator
 import {
   CardCheckResponseDto,
   DebtBulkResponseDto,
+  DebtCarryOverResponseDto,
+  DebtPaymentCreatedResponseDto,
   DebtCreatedResponseDto,
   DebtDetailResponseDto,
   DebtListResponseDto,
@@ -19,6 +21,7 @@ import {
   CardCheckQueryDto,
   CreateDebtDto,
   DebtBulkDto,
+  DebtCarryOverDto,
   DebtListQueryDto,
   DebtPaymentDto,
   DebtSummaryQueryDto,
@@ -53,6 +56,18 @@ export class DebtsController {
   @ResponseMessage('DEBTS_CARD_CHECK', 'Card checked')
   cardCheck(@Query() query: CardCheckQueryDto) {
     return this.debtsService.cardCheck(query)
+  }
+
+  @Post('carry-over')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      '"Arrastrar saldos pendientes": open installments of earlier months move to the target month (dryRun counts)',
+  })
+  @ApiOkResponse({ type: DebtCarryOverResponseDto })
+  @ResponseMessage('DEBTS_CARRIED_OVER', 'Pending balances carried over')
+  carryOver(@Body() body: DebtCarryOverDto) {
+    return this.debtsService.carryOver(body)
   }
 
   @Post('bulk')
@@ -101,7 +116,7 @@ export class DebtsController {
 
   @Post(':id/payments')
   @ApiOperation({ summary: 'Register a payment (422 DEBT_PAYMENT_EXCEEDS_BALANCE above the balance)' })
-  @ApiOkResponse({ type: DebtResponseDto })
+  @ApiOkResponse({ type: DebtPaymentCreatedResponseDto })
   @ResponseMessage('DEBT_PAYMENT_CREATED', 'Payment registered')
   addPayment(@Param('id') id: string, @Body() body: DebtPaymentDto) {
     return this.debtsService.addPayment(id, body)

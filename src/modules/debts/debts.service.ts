@@ -18,17 +18,24 @@ import { DebtPaymentExceedsBalanceException } from '@/commons/exceptions/debt/de
 import { DebtDBRepository } from '@/db/models/debt/debtDB.repository'
 import { DebtWithPersonDbDto } from '@/db/models/debt/debtDB.dto'
 import { StatementDBRepository } from '@/db/models/statement/statementDB.repository'
+import { AttachmentsService } from '@/modules/attachments/attachments.service'
+import { AttachmentRefType } from '@/commons/constants/commitment.constant'
 
 import {
   CardCheckQueryDto,
   CreateDebtDto,
   DebtBulkDto,
+  DebtCarryOverDto,
   DebtListQueryDto,
   DebtPaymentDto,
   DebtSummaryQueryDto,
   UpdateDebtDto,
 } from './dto/request/debts.dto'
 import { DebtBulkAction } from './validations/debts.validation'
+
+// Soles per unit of the installment's currency (1 for soles, or when there is no rate yet)
+const penRate = (debt: { amount: number; amountInPen: number | null }) =>
+  debt.amount > 0 && debt.amountInPen != null ? debt.amountInPen / debt.amount : 1
 
 // A statement line that reads like interest or a fee (the AI leaves them out; a template may keep them)
 const INTEREST_LINE = /\b(interes|intereses|comision|mora|penalidad|cargo por)\b/
@@ -76,6 +83,7 @@ export class DebtsService {
   constructor(
     private readonly debtDBRepository: DebtDBRepository,
     private readonly statementDBRepository: StatementDBRepository,
+    private readonly attachmentsService: AttachmentsService,
   ) {}
 
   async list({ status, ...filters }: DebtListQueryDto): Promise<DebtView[]> {
@@ -95,8 +103,8 @@ export class DebtsService {
 
   // Me debe · le debo · neto per person, in soles (other currencies stay out until they have an exchange rate);
   // with a month, only that one (or every month until it)
-  async summary({ month, year, until }: DebtSummaryQueryDto = {}): Promise<PersonDebtSummary[]> {
-    const open = (await this.debtDBRepository.findMany({ statuses: OPEN_DEBT_STATUSES, month, year, until }))
+  async summary({ month, year, until, from, to }: DebtSummaryQueryDto = {}): Promise<PersonDebtSummary[]> {
+    const open = (await this.debtDBRepository.findMany({ statuses: OPEN_DEBT_STATUSES, month, year, until, from, to }))
       .map((debt) => this.toView(debt))
       .filter((debt) => debt.currency === Currency.PEN)
     const byPerson = new Map<string, PersonDebtSummary>()
@@ -158,6 +166,16 @@ export class DebtsService {
       kind: kind ?? (toCents(amount) < balance ? DebtPaymentKind.PARTIAL : DebtPaymentKind.PAYMENT),
       notes: notes ?? null,
     })
+  }
+
+  // "Arrastrar saldos pendientes al mes en curso": open installments of earlier months move to the target month
+  async carryOver({ month, year, direction, personId, dryRun }: DebtCarryOverDto) {
+    const debts = (await this.debtDBRepository.findCarryable({ month, year }, { direction, personId })).filter(
+      (debt) => balanceOf(debt) > 0,
+    )
+    const balance = toCents(debts.reduce((sum, debt) => sum + balanceOf(debt) * penRate(debt), 0))
+    if (!dryRun && debts.length) await this.debtDBRepository.carryOver(debts, { month, year })
+    return { dryRun: !!dryRun, affected: debts.length, balance, ids: debts.map((debt) => debt.id) }
   }
 
   // Selección múltiple (D115): one action over several debts
@@ -363,8 +381,11 @@ export class DebtsService {
     }
   }
 
-  deletePayment(id: string, paymentId: string) {
-    return this.debtDBRepository.deletePayment(id, paymentId)
+  // Its Comprobante leaves with it (the file is released unless something else still uses it)
+  async deletePayment(id: string, paymentId: string) {
+    const debt = await this.debtDBRepository.deletePayment(id, paymentId)
+    await this.attachmentsService.removeOf([AttachmentRefType.DEBT_PAYMENT], paymentId)
+    return debt
   }
 
   // Bot: "dany me pagó 150" covers the oldest installments first; nothing is saved until ✅ Confirmar.

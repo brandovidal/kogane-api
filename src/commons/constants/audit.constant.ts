@@ -28,6 +28,7 @@ export const AUDITED_TABLES = [
   'exp_debt_payments',
   'exp_commitments',
   'exp_contributions',
+  'exp_person_summaries',
   'bud_monthly_budgets',
   'bud_budget_groups',
   'bud_category_budgets',
@@ -46,6 +47,7 @@ export const AUDIT_ID_COLUMN: Record<string, string> = { ntf_settings: 'kind' }
 // Recorded as "changed", never in the clear (D94): the value is replaced by MASKED_VALUE (null stays null)
 export const SENSITIVE_COLUMNS: Record<string, string[]> = {
   cat_people: ['documentNumber'],
+  cat_payment_methods: ['statementPassword'],
 }
 export const MASKED_VALUE = '•••'
 

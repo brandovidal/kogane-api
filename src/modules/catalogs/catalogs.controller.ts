@@ -25,6 +25,7 @@ import {
   CreateBudgetGroupDto,
   CreateCategoryDto,
   CardHoldersDto,
+  StatementPasswordDto,
   CreatePaymentMethodDto,
   CreatePersonDto,
   UpdateBudgetGroupDto,
@@ -104,6 +105,17 @@ export class PaymentMethodsController {
   @ResponseMessage('CARD_HOLDERS_SAVED', 'Card holders saved')
   saveHolders(@Param('id') id: string, @Body() { holders }: CardHoldersDto) {
     return this.cardHolderDBRepository.replace(id, holders)
+  }
+
+  @Put(':id/statement-password')
+  @ApiOperation({
+    summary:
+      'Save or remove (null) the password of the statement PDFs of a card (I12); only hasStatementPassword is answered',
+  })
+  @ApiOkResponse({ type: PaymentMethodResponseDto })
+  @ResponseMessage('STATEMENT_PASSWORD_SAVED', 'Statement password saved')
+  saveStatementPassword(@Param('id') id: string, @Body() { password }: StatementPasswordDto) {
+    return this.paymentMethodDBRepository.setStatementPassword(id, password)
   }
 
   @Get()

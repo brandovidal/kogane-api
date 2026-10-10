@@ -7,10 +7,11 @@ import {
   Param,
   Post,
   Query,
+  UploadedFile,
   UploadedFiles,
   UseInterceptors,
 } from '@nestjs/common'
-import { FilesInterceptor } from '@nestjs/platform-express'
+import { FileInterceptor, FilesInterceptor } from '@nestjs/platform-express'
 import { ApiBody, ApiConsumes, ApiOkResponse, ApiOperation } from '@nestjs/swagger'
 
 import { MAX_IMPORT_BYTES } from '@/commons/constants/import.constant'
@@ -18,12 +19,14 @@ import { ApiRest } from '@/commons/decorators/api-rest.decorator'
 import { ResponseMessage } from '@/commons/decorators/response-message.decorator'
 import { EmptyResponseDto } from '@/commons/helpers/api-response.helper'
 
-import { ImportRowsQueryDto } from './dto/request/imports.dto'
+import { ImportRowsQueryDto, ListImportQueryDto } from './dto/request/imports.dto'
+import { ListImportFile, ListImportService } from './list/list-import.service'
 import {
   ApplyImportResponseDto,
   ImportDetailResponseDto,
   ImportListResponseDto,
   ImportRowsResponseDto,
+  ListImportResponseDto,
 } from './dto/response/imports-response.dto'
 import { ImportsService, UploadedImportFile } from './imports.service'
 
@@ -31,7 +34,37 @@ import { ImportsService, UploadedImportFile } from './imports.service'
 @ApiRest('imports')
 @Controller('imports')
 export class ImportsController {
-  constructor(private readonly importsService: ImportsService) {}
+  constructor(
+    private readonly importsService: ImportsService,
+    private readonly listImportService: ListImportService,
+  ) {}
+
+  @Post('list')
+  @HttpCode(HttpStatus.OK)
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: MAX_IMPORT_BYTES } }))
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      required: ['file'],
+      properties: {
+        file: {
+          type: 'string',
+          format: 'binary',
+          description:
+            'CSV with the columns of "Exportar lista (CSV)" (Descripción, Monto, Moneda, Fecha, Mes de pago…)',
+        },
+      },
+    },
+  })
+  @ApiOperation({
+    summary: '"Importar gastos… / plataformas… / recurrentes… / cuotas… / deudas…": preview, or create with apply=true',
+  })
+  @ApiOkResponse({ type: ListImportResponseDto })
+  @ResponseMessage('LIST_IMPORTED', 'List import read')
+  importList(@Query() { target, apply }: ListImportQueryDto, @UploadedFile() file?: ListImportFile) {
+    return this.listImportService.run(target, file, !!apply)
+  }
 
   @Post('notion')
   @HttpCode(HttpStatus.OK)

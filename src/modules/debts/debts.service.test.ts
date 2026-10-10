@@ -7,6 +7,7 @@ import { DebtDBRepository } from '@/db/models/debt/debtDB.repository'
 import { DebtWithPersonDbDto } from '@/db/models/debt/debtDB.dto'
 import { StatementDBRepository } from '@/db/models/statement/statementDB.repository'
 
+import { AttachmentsService } from '@/modules/attachments/attachments.service'
 import { DebtsService } from './debts.service'
 import { DebtBulkAction } from './validations/debts.validation'
 
@@ -24,6 +25,8 @@ const buildDebt = (overrides: Partial<DebtWithPersonDbDto> = {}): DebtWithPerson
   installment: '1/3',
   paymentMonth: 9,
   paymentYear: 2026,
+  carriedFromMonth: null,
+  carriedFromYear: null,
   dueDate: null,
   status: DebtStatus.PENDING,
   paidAmount: 0,
@@ -57,8 +60,11 @@ const mockRepository = {
   setCard: vi.fn(),
   deleteMany: vi.fn(),
   withPayments: vi.fn(),
+  findCarryable: vi.fn(),
+  carryOver: vi.fn(),
 }
 const mockStatements = { findLatestForCard: vi.fn(), findCardExpenses: vi.fn() }
+const mockAttachments = { removeOf: vi.fn() }
 
 describe('DebtsService', () => {
   let service: DebtsService
@@ -72,6 +78,7 @@ describe('DebtsService', () => {
         DebtsService,
         { provide: DebtDBRepository, useValue: mockRepository },
         { provide: StatementDBRepository, useValue: mockStatements },
+        { provide: AttachmentsService, useValue: mockAttachments },
       ],
     }).compile()
     service = module.get(DebtsService)
@@ -330,5 +337,39 @@ describe('DebtsService', () => {
       ['Danery', 200],
       ['Bruce', 50],
     ])
+  })
+
+  describe('carryOver', () => {
+    it('should carry the open installments of earlier months to the target month, in soles', async () => {
+      mockRepository.findCarryable.mockResolvedValue([
+        buildDebt({ id: 'd1', paymentMonth: 8, paidAmount: 100 }),
+        buildDebt({ id: 'd2', paymentMonth: 7, currency: 'USD', amount: 10, amountInPen: 37.5 }),
+        buildDebt({ id: 'd3', paymentMonth: 6, paidAmount: 400 }),
+      ])
+
+      const result = await service.carryOver({ month: 10, year: 2026, direction: DebtDirection.OWED_TO_ME })
+
+      expect(mockRepository.findCarryable).toHaveBeenCalledWith(
+        { month: 10, year: 2026 },
+        { direction: DebtDirection.OWED_TO_ME, personId: undefined },
+      )
+      expect(result).toEqual({ dryRun: false, affected: 2, balance: 337.5, ids: ['d1', 'd2'] })
+      expect(mockRepository.carryOver.mock.calls[0][0].map((row: { id: string }) => row.id)).toEqual(['d1', 'd2'])
+      expect(mockRepository.carryOver.mock.calls[0][1]).toEqual({ month: 10, year: 2026 })
+    })
+
+    it('should only count on a dry run', async () => {
+      mockRepository.findCarryable.mockResolvedValue([buildDebt({ id: 'd1', paymentMonth: 8 })])
+      const result = await service.carryOver({ month: 10, year: 2026, dryRun: true })
+      expect(result).toMatchObject({ dryRun: true, affected: 1 })
+      expect(mockRepository.carryOver).not.toHaveBeenCalled()
+    })
+  })
+
+  it('should release the Comprobante of a deleted payment', async () => {
+    mockRepository.deletePayment.mockResolvedValue(buildDebt())
+    await service.deletePayment('d1', 'pay1')
+    expect(mockRepository.deletePayment).toHaveBeenCalledWith('d1', 'pay1')
+    expect(mockAttachments.removeOf).toHaveBeenCalledWith(['debt_payment'], 'pay1')
   })
 })

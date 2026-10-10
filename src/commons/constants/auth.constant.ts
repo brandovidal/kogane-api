@@ -6,6 +6,7 @@ export const OAUTH_STATE_COOKIE = 'kogane_oauth'
 export const SESSION_DAYS = 30
 export const INVITE_DAYS = 7
 export const LINK_CODE_MINUTES = 15 // the code that links a Telegram chat to a user
+export const PASSWORD_RESET_MINUTES = 60 // the link of "¿Olvidaste tu contraseña?"
 export const OAUTH_STATE_MINUTES = 10
 export const MAX_LOGIN_ATTEMPTS = 5 // failed sign-ins per email…
 export const LOGIN_LOCK_MINUTES = 15 // …in this window
@@ -29,6 +30,7 @@ export enum UserStatus {
 export enum AuthTokenKind {
   TELEGRAM_LINK = 'telegram_link',
   GOOGLE_STATE = 'google_state',
+  PASSWORD_RESET = 'password_reset',
 }
 
 // Each role can do what the ones below it do: the superadmin is everything (and can enter as any user, the backdoor of

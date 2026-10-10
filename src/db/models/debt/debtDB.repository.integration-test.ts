@@ -134,4 +134,29 @@ describe('DebtDBRepository (integration)', () => {
     await expect(repository.findById(debt.id)).rejects.toThrow(DebtNotFoundException)
     await expect(repository.delete(debt.id)).rejects.toThrow(DebtNotFoundException)
   })
+
+  it('should carry open installments of earlier months to the target month, remembering only the first origin', async () => {
+    const description = `Arrastre ${Date.now()}`
+    const [august, september, paid] = await repository.createMany([
+      installment({ description, paymentMonth: 8 }),
+      installment({ description, paymentMonth: 9 }),
+      installment({ description, paymentMonth: 7 }),
+    ])
+    await repository.addPayment({ debtId: paid.id, amount: 400, paidAt: new Date('2032-07-10T15:00:00Z') })
+
+    const carryable = (await repository.findCarryable({ month: 10, year: 2032 }, { personId })).filter(
+      (debt) => debt.description === description,
+    )
+    expect(carryable.map((debt) => debt.id)).toEqual([august.id, september.id])
+
+    await repository.carryOver(carryable, { month: 10, year: 2032 })
+    const moved = await prisma.debt.findUniqueOrThrow({ where: { id: august.id } })
+    expect(moved).toMatchObject({ paymentMonth: 10, paymentYear: 2032, carriedFromMonth: 8, carriedFromYear: 2032 })
+
+    await repository.carryOver([moved], { month: 11, year: 2032 })
+    expect(await prisma.debt.findUniqueOrThrow({ where: { id: august.id } })).toMatchObject({
+      paymentMonth: 11,
+      carriedFromMonth: 8,
+    })
+  })
 })

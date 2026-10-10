@@ -1,3 +1,5 @@
+import { RecurringTemplateExistsException } from '@/commons/exceptions/expense/recurring-template-exists.exception'
+import { templateFromRow } from '@/commons/helpers/recurring.helper'
 import { Injectable, Logger } from '@nestjs/common'
 import { ZodValidationException } from 'nestjs-zod'
 
@@ -65,6 +67,20 @@ export class ExpensesService {
     return data.sharedWith === undefined
       ? data
       : { ...data, sharedWith: data.sharedWith ? JsonHelper.stringify(data.sharedWith) : null }
+  }
+
+  // "Pasar desde Costos fijos… / Plataformas…" of Recurrentes: a template that repeats the series of a row every
+  // month, from its latest row (409 RECURRING_TEMPLATE_EXISTS when the series already has one)
+  async recurringFromSeries(resource: ExpenseResource.FIXED_COST | ExpenseResource.SUBSCRIPTION, id: string) {
+    const series = await this.expenseRecordDBRepository.findSeries(resource, id)
+    if (series.templates) throw new RecurringTemplateExistsException({ resource, id })
+    const latest = series.rows[series.rows.length - 1]
+    const row = (await this.expenseRecordDBRepository.findById(resource, latest?.id ?? id)) as Record<string, unknown>
+    const from = resource === ExpenseResource.FIXED_COST ? 'fixed_cost' : 'subscription'
+    return this.toView(
+      ExpenseResource.RECURRING,
+      await this.expenseRecordDBRepository.create(ExpenseResource.RECURRING, templateFromRow(row, from)),
+    )
   }
 
   private toView(resource: ExpenseResource, row: unknown) {

@@ -40,6 +40,7 @@ export interface StatementUpload {
   paymentMethodId?: string | null
   personId?: string | null
   savePassword?: boolean
+  saveCardPassword?: boolean // I12: keep the typed password on the card of the statement (if it opened it)
 }
 
 const day = (isoDay: string | null) => (isoDay ? new Date(`${isoDay}T00:00:00.000Z`) : null)
@@ -89,15 +90,19 @@ export class StatementsService {
     private readonly cardHolderDBRepository: CardHolderDBRepository,
   ) {}
 
-  async upload({ data, password, paymentMethodId, personId, savePassword }: StatementUpload) {
-    const [owner, people] = await Promise.all([
+  async upload({ data, password, paymentMethodId, personId, savePassword, saveCardPassword }: StatementUpload) {
+    const [owner, people, cardPasswords] = await Promise.all([
       this.personDBRepository.findDefault(),
       this.personDBRepository.findActive(),
+      this.paymentMethodDBRepository.findStatementPasswords(),
     ])
     if (personId && !people.some((person) => person.id === personId)) {
       throw new StatementUnreadableException({ reason: 'selected person not found' })
     }
-    const opened = await this.openPdf(data, password, personId ?? null, owner, people)
+    const opened = await this.openPdf(data, password, personId ?? null, owner, people, {
+      chosenCardId: paymentMethodId ?? null,
+      cardPasswords,
+    })
     const { lines } = opened
     const { parsed, source } = await this.read(lines, opened.password)
     const assignedPersonId =
@@ -108,6 +113,9 @@ export class StatementsService {
     }
 
     const card = await this.cardOf(paymentMethodId ?? null, parsed, lines)
+    if (saveCardPassword && password && opened.password === password) {
+      await this.paymentMethodDBRepository.setStatementPassword(card.id, password)
+    }
     const period = this.periodOf(parsed, card)
     const [currentExpenses, previousExpenses, holders] = await Promise.all([
       this.cardExpenses(card.id, period),
@@ -159,6 +167,12 @@ export class StatementsService {
     const view = await this.get(statement.id)
     await this.notify(view).catch((error: Error) => this.logger.warn(`[upload] notice not sent: ${error.message}`))
     return view
+  }
+
+  // "Ver estado de cuenta": a signed link (10 minutes) to the PDF that was read; null when it was not kept
+  async fileUrl(id: string): Promise<{ url: string | null }> {
+    const statement = await this.statementDBRepository.findById(id)
+    return { url: await this.storedFilesService.signedUrl(statement.fileId ?? null) }
   }
 
   async get(id: string) {
@@ -474,6 +488,10 @@ export class StatementsService {
     personId: string | null,
     owner: PersonDbDto | null,
     people: PersonDbDto[],
+    cards: { chosenCardId: string | null; cardPasswords: { id: string; password: string }[] } = {
+      chosenCardId: null,
+      cardPasswords: [],
+    },
   ): Promise<{ lines: string[]; password: string | null; personId: string | null }> {
     const byId = (id: string | null | undefined) => people.find((person) => person.id === id) ?? null
     const candidates: { password: string; personId: string | null }[] = []
@@ -483,9 +501,12 @@ export class StatementsService {
       }
     }
     add(typed, null)
+    // The password saved on the chosen card (I12) comes before any document number
+    add(cards.cardPasswords.find((card) => card.id === cards.chosenCardId)?.password, null)
     add(byId(personId)?.documentNumber, personId)
     add(owner?.documentNumber, owner?.id ?? null)
     people.forEach((person) => add(person.documentNumber, person.id))
+    cards.cardPasswords.forEach((card) => add(card.password, null))
 
     if (!candidates.length) return { lines: await readPdfLines(data, null), password: null, personId: null }
     for (const candidate of candidates) {

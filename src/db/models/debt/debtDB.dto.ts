@@ -27,6 +27,8 @@ export interface DebtFilterDbDto {
   month?: number // with year: that payment month (or every one until it, with until)
   year?: number
   until?: boolean
+  from?: string // YYYY-MM range (PeriodFilter), only without month and year
+  to?: string
   paymentMethodId?: string
 }
 

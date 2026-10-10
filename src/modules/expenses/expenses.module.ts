@@ -5,6 +5,7 @@ import { RecurringExpenseDBModule } from '@/db/models/recurring-expense/recurrin
 import { AttachmentsModule } from '@/modules/attachments/attachments.module'
 import { StoredFilesModule } from '@/modules/stored-files/stored-files.module'
 
+import { CardReviewsController } from './card-reviews.controller'
 import { ExpenseMovesController } from './expense-moves.controller'
 import { ExpenseMovesService } from './expense-moves.service'
 import { ExpensesController } from './expenses.controller'
@@ -14,8 +15,8 @@ import { RecurringExpensesService } from './recurring-expenses.service'
 
 @Module({
   imports: [ExpenseRecordDBModule, RecurringExpenseDBModule, StoredFilesModule, AttachmentsModule],
-  controllers: [ExpensesController, ExpenseMovesController, RecurringExpensesController],
+  controllers: [ExpensesController, ExpenseMovesController, CardReviewsController, RecurringExpensesController],
   providers: [ExpensesService, ExpenseMovesService, RecurringExpensesService],
-  exports: [RecurringExpensesService],
+  exports: [RecurringExpensesService, ExpensesService],
 })
 export class ExpensesModule {}

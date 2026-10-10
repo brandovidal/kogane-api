@@ -82,6 +82,28 @@ export class PaymentMethodDBRepository {
     }
   }
 
+  // I12: the password that opens the statement PDFs of a card (null removes it)
+  async setStatementPassword(id: string, password: string | null): Promise<PaymentMethodDbDto> {
+    try {
+      const paymentMethod = await this.prisma.paymentMethod.update({
+        where: { id },
+        data: { statementPassword: password },
+      })
+      return this.serializer.toDto(paymentMethod)
+    } catch (error) {
+      throw toCatalogError(error, 'paymentMethod', id)
+    }
+  }
+
+  // Only for opening statement PDFs: the saved passwords, the chosen card first
+  async findStatementPasswords(): Promise<{ id: string; password: string }[]> {
+    const rows = await this.prisma.paymentMethod.findMany({
+      where: { statementPassword: { not: null } },
+      select: { id: true, statementPassword: true },
+    })
+    return rows.map((row) => ({ id: row.id, password: row.statementPassword! }))
+  }
+
   // Expenses point to payment methods: they are deactivated, never deleted
   async deactivate(id: string): Promise<PaymentMethodDbDto> {
     return this.update(id, { isActive: false, showInBot: false })
