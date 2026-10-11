@@ -130,7 +130,7 @@ Verificación: `/v1/health` muestra `redis: OK` y el log dice `reminders schedul
 
 1. R2 → **Create bucket** `kogane` (privado; sin acceso público).
 2. R2 → **Manage API tokens → Create API token** con permiso _Object Read & Write_ solo para ese bucket → `R2_ACCESS_KEY_ID` y `R2_SECRET_ACCESS_KEY`; el **Account ID** → `R2_ACCOUNT_ID`.
-3. Cargarlas en Railway con `STORAGE_ENV=prod`, y en tu `.env.dev` las mismas claves con `STORAGE_ENV=dev`. `dev` y `prod` siempre usan R2; sin las claves la API no arranca. Solo los tests (`STORAGE_ENV=test`) guardan en disco (`.data/storage-test`).
+3. Cargarlas en Railway con `STORAGE_ENV=prod`, y en tu `.env.dev` las mismas claves con `STORAGE_ENV=dev`. `dev`, `qa` y `prod` siempre usan R2; sin las claves la API no arranca. Solo los tests (`STORAGE_ENV=test`) guardan en disco (`.data/storage-test`).
 4. **Valor del token:** la app no lo usa (el Secret Access Key es su SHA-256). Sirve para `wrangler` y la API REST de Cloudflare; guárdalo en tu gestor de contraseñas.
 5. **Reglas de ciclo de vida** (respaldo de la limpieza diaria de la API), una sola vez con `npx wrangler login`:
 
@@ -191,7 +191,7 @@ La app no arrancó. Railway → Deployments → el último → **Deploy Logs**:
 - `DATABASE_URL is not set` o `DATABASE_AUTH_TOKEN is not set for Turso`: falta la variable (o se pegó con comillas).
 - `SERVER_ERROR: Server returned HTTP status 401` (p. ej. en el login, `authAttempt.count`): Turso rechaza `DATABASE_AUTH_TOKEN`: venció o se invalidó. Crear uno nuevo (sección 1) y actualizarlo en Railway, GitHub y `.env.prod`.
 - `URL_INVALID`: la URL de Turso tiene comillas o espacios.
-- `STORAGE_ENV must be dev, prod or test` o `R2_… are required`: faltan `STORAGE_ENV=prod` o las claves de R2 (sección 4b).
+- `STORAGE_ENV must be dev, qa, prod or test` o `R2_… are required`: faltan `STORAGE_ENV=prod` o las claves de R2 (sección 4b).
 - `Cannot find module './internal/class.ts'`: el cliente de Prisma se generó con imports `.ts`. Lo evita `importFileExtension = ""` en `prisma/schema.prisma`; el job `image` del CI (`make docker`) frena el deploy si la imagen no arranca.
 - Ningún error y el health check falla: revisar que el servicio use el `Dockerfile` (`railway.json`) y que `PORT` no esté fijado a mano.
 

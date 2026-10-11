@@ -10,6 +10,7 @@ export const TEMPORARY_FILE_DAYS = 7
 export enum StorageEnv {
   PROD = 'prod',
   DEV = 'dev',
+  QA = 'qa',
   TEST = 'test',
 }
 

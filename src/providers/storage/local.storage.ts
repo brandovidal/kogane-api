@@ -18,7 +18,6 @@ const CONTENT_TYPES: Record<string, string> = {
   '.wav': 'audio/wav',
 }
 
-// Tests only (STORAGE_ENV=test): files in a git-ignored folder, never R2
 export class LocalStorage implements ObjectStorage {
   readonly driver = 'local' as const
 

@@ -22,7 +22,6 @@ import { StoredFilesModule } from './stored-files.module'
 import { StoredFilesService } from './stored-files.service'
 
 const DAY_MS = 24 * 60 * 60_000
-// STORAGE_ENV=test: LocalStorage in STORAGE_LOCAL_DIR, same layout as R2 (D58)
 const onDisk = (key: string) => join(process.cwd(), process.env.STORAGE_LOCAL_DIR ?? '.data/storage', key)
 
 // Temporary files end to end on SQLite + the local folder: the database keeps where the bytes are, never the bytes

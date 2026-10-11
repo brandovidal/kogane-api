@@ -144,7 +144,6 @@ describe('Conversation flows (integration)', () => {
         debt: true,
       },
     })
-  // STORAGE_ENV=test: files go to the local folder with the same layout as R2
   const onDisk = (key: string) => join(process.cwd(), process.env.STORAGE_LOCAL_DIR ?? '.data/storage', key)
   const storedFileOf = async (draftId: string) => {
     const { fileId } = await prisma.expenseDraft.findUniqueOrThrow({ where: { id: draftId } })
