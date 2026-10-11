@@ -2,8 +2,8 @@
 
 .PHONY: redis redis-stop notify
 
-# The API of that environment: the local one (dev) or production (prod, PUBLIC_URL)
-ifeq ($(ENV),prod)
+# The API of that environment: the local one (dev) or the deployed one (qa, prod: PUBLIC_URL)
+ifneq ($(ENV),dev)
 NOTIFY_BASE := $$PUBLIC_URL
 else
 NOTIFY_BASE := http://localhost:$${PORT:-5560}

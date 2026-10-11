@@ -12,7 +12,7 @@ NestJS backend for expense intake from chat (Telegram first, WhatsApp later) wit
 
 ## Commands
 
-Tasks live in the `Makefile` + `makefiles/*.mk`, one file per group (`make help` lists them by group); `make dev` = API in watch mode + the tunnel of the `.env.dev` bot (`scripts/dev.sh`); `make dev:only` or `pnpm dev` = only the API; `ENV=dev` (default, `.env.dev`, SQLite `dev.db`) or `ENV=prod` (`.env.prod`, Turso `kogane-db`, production). `package.json` only keeps what Railway, CI and husky call.
+Tasks live in the `Makefile` + `makefiles/*.mk`, one file per group (`make help` lists them by group); `make dev` = API in watch mode + the tunnel of the `.env.dev` bot (`scripts/dev.sh`); `make dev:only` or `pnpm dev` = only the API; `ENV=dev` (default, `.env.dev`, SQLite `dev.db`), `ENV=qa` (`.env.qa`, Turso `kogane-db-dev`, the `kogane-api-dev` Railway service) or `ENV=prod` (`.env.prod`, Turso `kogane-db`, production). `package.json` only keeps what Railway, CI and husky call.
 
 ```sh
 make deps [ENV=prod]     # after pulling: Prisma client + pending migrations + seed + bot command menu

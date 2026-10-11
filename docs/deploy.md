@@ -67,7 +67,7 @@ El `Makefile` define las variables comunes (`ENV`, archivo `.env.<ENV>`) e inclu
 
 1. La base de producción es `kogane-db`. Si hay que crearla: `turso db create kogane-db`.
 2. URL: `turso db show kogane-db --url` → `DATABASE_URL`.
-3. Token: `turso db tokens create kogane-db` → `DATABASE_AUTH_TOKEN`. Para **rotarlo** (el anterior se pegó en un chat): `turso db tokens invalidate kogane-db` y crear uno nuevo; actualizarlo en Railway, en GitHub y en `.env.prod`.
+3. Token: `turso db tokens create kogane-db --expiration none` → `DATABASE_AUTH_TOKEN` (un token con fecha de vencimiento, p. ej. 7 días, deja la app sin base cuando vence: `SERVER_ERROR: Server returned HTTP status 401`). Para **rotarlo** (el anterior se pegó en un chat): `turso db tokens invalidate kogane-db` y crear uno nuevo; actualizarlo en Railway, en GitHub y en `.env.prod`.
 
 ## 2. Railway
 
@@ -189,6 +189,7 @@ Pasos y qué revisar en [`import-notion.md`](import-notion.md).
 La app no arrancó. Railway → Deployments → el último → **Deploy Logs**:
 
 - `DATABASE_URL is not set` o `DATABASE_AUTH_TOKEN is not set for Turso`: falta la variable (o se pegó con comillas).
+- `SERVER_ERROR: Server returned HTTP status 401` (p. ej. en el login, `authAttempt.count`): Turso rechaza `DATABASE_AUTH_TOKEN`: venció o se invalidó. Crear uno nuevo (sección 1) y actualizarlo en Railway, GitHub y `.env.prod`.
 - `URL_INVALID`: la URL de Turso tiene comillas o espacios.
 - `STORAGE_ENV must be dev, prod or test` o `R2_… are required`: faltan `STORAGE_ENV=prod` o las claves de R2 (sección 4b).
 - `Cannot find module './internal/class.ts'`: el cliente de Prisma se generó con imports `.ts`. Lo evita `importFileExtension = ""` en `prisma/schema.prisma`; el job `image` del CI (`make docker`) frena el deploy si la imagen no arranca.
