@@ -61,6 +61,7 @@ export const NTF_TEXTS = {
     [PaymentOutcome.ALREADY_PAID]: 'Ya estaba pagado',
     [PaymentOutcome.NOTHING_TO_PAY]: 'No hay nada pendiente de ese pago',
     [PaymentOutcome.NOT_FOUND]: 'Este aviso ya no existe',
+    [PaymentOutcome.PARTIAL]: '✅ Pago parcial registrado',
   } satisfies Record<PaymentOutcome, string>,
   askAmount: (title: string) =>
     `✏️ Escribe el monto correcto de <b>${escapeHtml(title)}</b> (por ejemplo <i>45.90</i>).`,

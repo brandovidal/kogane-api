@@ -49,7 +49,10 @@ export class AuditChangeDBRepository {
   }
 
   // Names of the catalog rows a change points to (personId → "Brando"), for the labels of the timeline
-  async namesOf(model: 'person' | 'category' | 'paymentMethod' | 'budgetGroup' | 'commitment', ids: string[]) {
+  async namesOf(
+    model: 'person' | 'category' | 'paymentMethod' | 'budgetGroup' | 'commitment' | 'account',
+    ids: string[],
+  ) {
     if (!ids.length) return []
     const delegate = this.prisma[model] as unknown as {
       findMany(args: unknown): Promise<{ id: string; name: string }[]>
