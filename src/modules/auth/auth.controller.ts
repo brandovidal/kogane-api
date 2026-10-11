@@ -1,4 +1,17 @@
-import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, Post, Query, Req, Res } from '@nestjs/common'
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Param,
+  Patch,
+  Post,
+  Query,
+  Req,
+  Res,
+} from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import { ApiOkResponse, ApiOperation, ApiResponse } from '@nestjs/swagger'
 import { Request, Response } from 'express'
@@ -22,6 +35,7 @@ import {
   GoogleStartQueryDto,
   LoginDto,
   ResetPasswordDto,
+  UpdateProfileDto,
 } from './dto/request/auth.dto'
 import {
   AuthConfigResponseDto,
@@ -100,6 +114,14 @@ export class AuthController {
   @ResponseMessage('ME', 'Current user')
   me(@Req() req: AuthedRequest & { impersonatedBy: AuthUser | null }) {
     return toSessionUser(req.user, req.impersonatedBy)
+  }
+
+  @Patch('me')
+  @ApiOperation({ summary: 'Edit your own profile: name, nickname, mobile and DNI (409 PHONE_TAKEN)' })
+  @ApiOkResponse({ type: SessionUserResponseDto })
+  @ResponseMessage('PROFILE_UPDATED', 'Profile saved')
+  async updateProfile(@Body() body: UpdateProfileDto, @Req() req: AuthedRequest & { impersonatedBy: AuthUser | null }) {
+    return toSessionUser(await this.authService.updateProfile(req.user.id, body), req.impersonatedBy)
   }
 
   @Post('impersonation/stop')

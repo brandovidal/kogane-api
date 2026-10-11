@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, Patch, Post, Put } from '@nestjs/common'
+import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, Patch, Post, Put, Query } from '@nestjs/common'
 import { ApiOkResponse, ApiOperation } from '@nestjs/swagger'
 
 import { ApiRest } from '@/commons/decorators/api-rest.decorator'
@@ -33,6 +33,7 @@ import {
   CreatePaymentMethodDto,
   CreatePersonDto,
   UpdateAccountDto,
+  PersonListQueryDto,
   UpdateBudgetGroupDto,
   UpdateCategoryDto,
   UpdatePaymentMethodDto,
@@ -60,8 +61,8 @@ export class PeopleController {
   @ApiOperation({ summary: 'People (active and inactive)' })
   @ApiOkResponse({ type: PersonListResponseDto })
   @ResponseMessage('PEOPLE_LISTED', 'People listed')
-  async findAll() {
-    return (await this.personDBRepository.findAll()).map(maskDocument)
+  async findAll(@Query() query: PersonListQueryDto) {
+    return (await this.personDBRepository.findAll(query.module)).map(maskDocument)
   }
 
   @Post()

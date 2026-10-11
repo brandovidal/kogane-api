@@ -10,6 +10,7 @@ import {
   googleStartQuerySchema,
   loginSchema,
   resetPasswordSchema,
+  updateProfileSchema,
   updateUserSchema,
 } from '../../validations/auth.validation'
 
@@ -23,3 +24,4 @@ export class ResetPasswordDto extends createZodDto(resetPasswordSchema) {}
 export class ChangePasswordDto extends createZodDto(changePasswordSchema) {}
 export class CreateInviteDto extends createZodDto(createInviteSchema) {}
 export class UpdateUserDto extends createZodDto(updateUserSchema) {}
+export class UpdateProfileDto extends createZodDto(updateProfileSchema) {}

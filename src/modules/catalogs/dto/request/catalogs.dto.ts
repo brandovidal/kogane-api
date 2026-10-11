@@ -9,9 +9,11 @@ import {
   categorySchema,
   createPaymentMethodSchema,
   paymentMethodSchema,
+  personListQuerySchema,
   personSchema,
 } from '../../validations/catalogs.validation'
 
+export class PersonListQueryDto extends createZodDto(personListQuerySchema) {}
 export class CreatePersonDto extends createZodDto(personSchema) {}
 export class UpdatePersonDto extends createZodDto(personSchema.partial()) {}
 

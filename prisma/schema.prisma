@@ -27,6 +27,7 @@ model Person {
   isActive       Boolean  @default(true)
   isDefault      Boolean  @default(false) // the owner: used when a message does not say who the expense is for
   documentNumber String? // DNI: the password of the bank statement PDFs (D94); never sent to the AI nor logged
+  appearsIn      String   @default("[]") // JSON array of PersonModule: the pages where this person can be picked (the owner: all)
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
@@ -997,6 +998,7 @@ model AuthUser {
   googleSub      String?   @unique // the account of Google that signs in as this user
   phone          String?   @unique // digits only (9 in Peru): also signs in with the password; set by an admin, never by the user
   documentNumber String? // DNI: copied to their "Yo" (D94); never returned in the clear
+  nickname       String? // how the app greets them; the web's profile edits it
   passwordHash   String? // scrypt: salt.hash
   role           String    @default("member") // UserRole
   status         String    @default("active") // UserStatus

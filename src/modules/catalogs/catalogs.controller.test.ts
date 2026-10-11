@@ -7,6 +7,7 @@ import { BudgetGroupDBRepository } from '@/db/models/budget-group/budgetGroupDB.
 import { CategoryDBRepository } from '@/db/models/category/categoryDB.repository'
 import { CardHolderDBRepository } from '@/db/models/card-holder/cardHolderDB.repository'
 import { PaymentMethodDBRepository } from '@/db/models/payment-method/paymentMethodDB.repository'
+import { PersonModule } from '@/commons/constants/catalog.constant'
 import { PersonDBRepository } from '@/db/models/person/personDB.repository'
 
 import {
@@ -52,13 +53,15 @@ describe('Catalogs controllers', () => {
     people.create.mockResolvedValue(person)
     people.update.mockResolvedValue(person)
     people.deactivate.mockResolvedValue(person)
-    await controller.findAll()
-    await controller.create({ name: 'Brenda', aliases: ['mi hermana'] })
+    await controller.findAll({})
+    await controller.findAll({ module: PersonModule.CARDS })
+    await controller.create({ name: 'Brenda', aliases: ['mi hermana'], appearsIn: [PersonModule.CARDS] })
     await controller.update('person-1', { isActive: false })
     await controller.deactivate('person-1')
 
-    expect(people.findAll).toHaveBeenCalled()
-    expect(people.create).toHaveBeenCalledWith({ name: 'Brenda', aliases: ['mi hermana'] })
+    expect(people.findAll).toHaveBeenNthCalledWith(1, undefined)
+    expect(people.findAll).toHaveBeenNthCalledWith(2, PersonModule.CARDS)
+    expect(people.create).toHaveBeenCalledWith({ name: 'Brenda', aliases: ['mi hermana'], appearsIn: ['cards'] })
     expect(people.update).toHaveBeenCalledWith('person-1', { isActive: false })
     expect(people.deactivate).toHaveBeenCalledWith('person-1')
   })
@@ -71,7 +74,7 @@ describe('Catalogs controllers', () => {
     ])
     people.update.mockResolvedValue({ id: 'me', name: 'Brando', documentNumber: '44556677' })
 
-    expect((await controller.findAll()).map((person) => person.documentNumber)).toEqual(['•••••677', null])
+    expect((await controller.findAll({})).map((person) => person.documentNumber)).toEqual(['•••••677', null])
     expect((await controller.update('me', { documentNumber: '44556677' })).documentNumber).toBe('•••••677')
     expect(people.update).toHaveBeenCalledWith('me', { documentNumber: '44556677' })
   })

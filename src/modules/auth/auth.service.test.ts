@@ -4,6 +4,7 @@ import { vi } from 'vitest'
 
 import { LEGACY_OWNER_ID, UserRole, UserStatus } from '@/commons/constants/auth.constant'
 import { InvalidCredentialsException } from '@/commons/exceptions/auth/invalid-credentials.exception'
+import { PhoneTakenException } from '@/commons/exceptions/auth/phone-taken.exception'
 import { InviteInvalidException } from '@/commons/exceptions/auth/invite-invalid.exception'
 import { LinkCodeInvalidException } from '@/commons/exceptions/auth/link-code-invalid.exception'
 import { ResetLinkInvalidException } from '@/commons/exceptions/auth/reset-link-invalid.exception'
@@ -41,7 +42,7 @@ const mockDB = {
   countFailedAttempts: vi.fn(),
   clearAttempts: vi.fn(),
 }
-const mockProvisioning = { provision: vi.fn() }
+const mockProvisioning = { provision: vi.fn(), syncOwnerDocument: vi.fn() }
 
 const user = (overrides: Record<string, unknown> = {}) => ({
   id: 'u1',
@@ -407,6 +408,38 @@ describe('AuthService', () => {
       await expect(
         service.resetPassword({ token: 'tok-1234567890', password: 'nueva-clave-segura' }),
       ).rejects.toBeInstanceOf(UserDisabledException)
+    })
+  })
+
+  describe('updateProfile (Perfil)', () => {
+    it('should save the nickname and a normalized mobile, and copy the DNI to their Yo (D94)', async () => {
+      mockDB.findUserByPhone.mockResolvedValueOnce(null)
+      mockDB.updateUser.mockResolvedValueOnce(user())
+
+      await service.updateProfile('u1', { nickname: 'Brand', phone: '+51 987 654 321', documentNumber: '44556677' })
+
+      expect(mockDB.updateUser).toHaveBeenCalledWith('u1', {
+        nickname: 'Brand',
+        phone: '987654321',
+        documentNumber: '44556677',
+      })
+      expect(mockProvisioning.syncOwnerDocument).toHaveBeenCalledWith('u1', '44556677')
+    })
+
+    it('should refuse a mobile that belongs to another account', async () => {
+      mockDB.findUserByPhone.mockResolvedValueOnce(user({ id: 'u2' }))
+
+      await expect(service.updateProfile('u1', { phone: '987654321' })).rejects.toBeInstanceOf(PhoneTakenException)
+      expect(mockDB.updateUser).not.toHaveBeenCalled()
+    })
+
+    it('should clear the mobile and leave the DNI of their Yo alone when it was not sent', async () => {
+      mockDB.updateUser.mockResolvedValueOnce(user())
+
+      await service.updateProfile('u1', { phone: null })
+
+      expect(mockDB.updateUser).toHaveBeenCalledWith('u1', { phone: null })
+      expect(mockProvisioning.syncOwnerDocument).not.toHaveBeenCalled()
     })
   })
 })
