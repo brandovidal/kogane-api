@@ -21,10 +21,11 @@ make superadmin EMAIL=yisusdracon@gmail.com PHONE=930764207 ENV=qa              
 make user-invite EMAIL=<correo> ROLE=member ENV=qa                               # invitación (admin|member)
 ```
 
-Sin terminal (requiere `ADMIN_BOOTSTRAP_KEY` en Railway):
+Sin terminal (requiere `ADMIN_BOOTSTRAP_KEY` en Railway; directo a la API, el proxy de la web no reenvía `x-admin-key`). En Postman: Kogane ▸ api ▸ auth ▸ `admin-superadmins`, entorno "Gastos - QA" con `x-admin-key` lleno.
 
 ```bash
-curl -X POST <url-api>/v1/admin/superadmins \
+curl -X POST https://kogane-api-dev.up.railway.app/v1/admin/superadmins \
+  -H "x-api-key: <API_KEY>" \
   -H "x-admin-key: <ADMIN_BOOTSTRAP_KEY>" -H "Content-Type: application/json" \
   -d '{"email":"yisusdracon@gmail.com","phone":"930764207"}'
 ```
