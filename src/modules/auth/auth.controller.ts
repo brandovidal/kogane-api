@@ -21,6 +21,7 @@ import { ApiRest } from '@/commons/decorators/api-rest.decorator'
 import { Public } from '@/commons/decorators/auth.decorator'
 import { ResponseMessage } from '@/commons/decorators/response-message.decorator'
 import { EmptyResponseDto } from '@/commons/helpers/api-response.helper'
+import { deviceOf } from '@/commons/helpers/device.helper'
 import { parseCookies, serializeCookie } from '@/commons/helpers/token.helper'
 import { AuthUser } from '@/generated/prisma/client'
 import { MailService } from '@/providers/mail/mail.service'
@@ -35,12 +36,15 @@ import {
   GoogleStartQueryDto,
   LoginDto,
   ResetPasswordDto,
+  RevokeSessionsDto,
   UpdateProfileDto,
 } from './dto/request/auth.dto'
 import {
   AuthConfigResponseDto,
+  DeviceSessionsResponseDto,
   GoogleStartResponseDto,
   InvitePreviewResponseDto,
+  RevokedSessionsResponseDto,
   SessionUserResponseDto,
   TelegramLinkResponseDto,
 } from './dto/response/auth-response.dto'
@@ -91,8 +95,8 @@ export class AuthController {
   })
   @ApiOkResponse({ type: SessionUserResponseDto })
   @ResponseMessage('LOGIN_OK', 'Signed in')
-  async login(@Body() body: LoginDto, @Res({ passthrough: true }) res: Response) {
-    const { user, token } = await this.authService.login(body.identifier, body.password)
+  async login(@Body() body: LoginDto, @Req() req: Request, @Res({ passthrough: true }) res: Response) {
+    const { user, token } = await this.authService.login(body.identifier, body.password, deviceOf(req))
     this.setSession(res, token)
     return toSessionUser(user)
   }
@@ -132,6 +136,7 @@ export class AuthController {
   async stopImpersonation(@Req() req: Request, @Res({ passthrough: true }) res: Response) {
     const { user, token } = await this.authService.stopImpersonation(
       parseCookies(req.headers.cookie)[SESSION_COOKIE] ?? '',
+      deviceOf(req),
     )
     this.setSession(res, token)
     return toSessionUser(user)
@@ -152,8 +157,8 @@ export class AuthController {
   @ApiOperation({ summary: 'Open an invitation with a password: the email is proven by the link; they are signed in' })
   @ApiOkResponse({ type: SessionUserResponseDto })
   @ResponseMessage('INVITE_ACCEPTED', 'Invitation accepted')
-  async acceptInvite(@Body() body: AcceptInviteDto, @Res({ passthrough: true }) res: Response) {
-    const { user, token } = await this.authService.acceptInvite(body)
+  async acceptInvite(@Body() body: AcceptInviteDto, @Req() req: Request, @Res({ passthrough: true }) res: Response) {
+    const { user, token } = await this.authService.acceptInvite(body, deviceOf(req))
     this.setSession(res, token)
     return toSessionUser(user)
   }
@@ -179,8 +184,8 @@ export class AuthController {
   })
   @ApiOkResponse({ type: SessionUserResponseDto })
   @ResponseMessage('PASSWORD_RESET', 'Password changed')
-  async resetPassword(@Body() body: ResetPasswordDto, @Res({ passthrough: true }) res: Response) {
-    const { user, token } = await this.authService.resetPassword(body)
+  async resetPassword(@Body() body: ResetPasswordDto, @Req() req: Request, @Res({ passthrough: true }) res: Response) {
+    const { user, token } = await this.authService.resetPassword(body, deviceOf(req))
     this.setSession(res, token)
     return toSessionUser(user)
   }
@@ -192,6 +197,67 @@ export class AuthController {
   @ResponseMessage('PASSWORD_CHANGED', 'Password saved')
   async password(@Body() body: ChangePasswordDto, @Req() req: AuthedRequest) {
     await this.authService.changePassword(req.user.id, body.current, body.next)
+  }
+
+  // ==================== Devices (Perfil ▸ Dispositivos) ====================
+
+  private clearSession(res: Response) {
+    res.append('Set-Cookie', serializeCookie(SESSION_COOKIE, '', { maxAgeSeconds: 0, secure: this.secure }))
+  }
+
+  @Get('sessions')
+  @ApiOperation({ summary: 'The devices where you are signed in (open sessions), the current one marked' })
+  @ApiOkResponse({ type: DeviceSessionsResponseDto })
+  @ResponseMessage('SESSIONS', 'Open sessions')
+  async sessions(@Req() req: AuthedRequest) {
+    const token = parseCookies(req.headers.cookie)[SESSION_COOKIE]
+    return { sessions: await this.authService.listSessions(req.user.id, token) }
+  }
+
+  @Post('sessions/revoke')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Close several of your sessions at once (ids that are not yours are ignored)' })
+  @ApiOkResponse({ type: RevokedSessionsResponseDto })
+  @ResponseMessage('SESSIONS_REVOKED', 'Sessions closed')
+  async revokeSessions(
+    @Body() body: RevokeSessionsDto,
+    @Req() req: AuthedRequest,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const result = await this.authService.revokeSessions(
+      req.user.id,
+      body.ids,
+      parseCookies(req.headers.cookie)[SESSION_COOKIE],
+    )
+    if (result.closedCurrent) this.clearSession(res)
+    return result
+  }
+
+  @Post('sessions/revoke-others')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Close every session except the one making the request' })
+  @ApiOkResponse({ type: RevokedSessionsResponseDto })
+  @ResponseMessage('SESSIONS_REVOKED', 'Sessions closed')
+  async revokeOtherSessions(@Req() req: AuthedRequest) {
+    const { revoked } = await this.authService.revokeOtherSessions(
+      req.user.id,
+      parseCookies(req.headers.cookie)[SESSION_COOKIE],
+    )
+    return { revoked, closedCurrent: false }
+  }
+
+  @Delete('sessions/:id')
+  @ApiOperation({ summary: 'Close one of your sessions (404 SESSION_NOT_FOUND when it is not yours)' })
+  @ApiOkResponse({ type: RevokedSessionsResponseDto })
+  @ResponseMessage('SESSION_REVOKED', 'Session closed')
+  async revokeSession(@Param('id') id: string, @Req() req: AuthedRequest, @Res({ passthrough: true }) res: Response) {
+    const result = await this.authService.revokeSession(
+      req.user.id,
+      id,
+      parseCookies(req.headers.cookie)[SESSION_COOKIE],
+    )
+    if (result.closedCurrent) this.clearSession(res)
+    return result
   }
 
   // ==================== Google ====================
@@ -247,7 +313,7 @@ export class AuthController {
         await this.authService.linkGoogleAccount(state.linkUserId, profile)
         return res.redirect(`${appUrl}/perfil?google=linked`)
       }
-      const { token } = await this.authService.signInWithGoogle(profile, state.invite)
+      const { token } = await this.authService.signInWithGoogle(profile, state.invite, deviceOf(req))
       this.setSession(res, token)
       return res.redirect(`${appUrl}${state.returnTo}`)
     } catch (error) {

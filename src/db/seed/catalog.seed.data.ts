@@ -107,6 +107,62 @@ export const PAYMENT_METHODS: PaymentMethodSeed[] = [
   },
 ]
 
+// What every new user starts with (D97): ways to pay that need no data of their own, and the credit cards most people
+// in Peru have, inactive ("no la tengo") and without billing days: the user turns on the ones they own and sets the
+// closing and due days. Created once; later edits are never overwritten
+export const BASE_PAYMENT_METHODS: PaymentMethodSeed[] = [
+  { name: 'Efectivo', type: PaymentMethodType.CASH, aliases: ['efectivo', 'cash'] },
+  { name: 'Yape', type: PaymentMethodType.WALLET, aliases: ['yape'] },
+  { name: 'Plin', type: PaymentMethodType.WALLET, aliases: ['plin'] },
+  { name: 'Interbank Débito', type: PaymentMethodType.DEBIT_CARD, aliases: ['interbank', 'ibk'], bank: 'Interbank' },
+  { name: 'BCP Débito', type: PaymentMethodType.DEBIT_CARD, aliases: ['bcp'], bank: 'BCP' },
+  { name: 'BBVA Débito', type: PaymentMethodType.DEBIT_CARD, aliases: ['bbva'], bank: 'BBVA' },
+  {
+    name: 'Scotiabank Débito',
+    type: PaymentMethodType.DEBIT_CARD,
+    aliases: ['scotiabank', 'scotia'],
+    bank: 'Scotiabank',
+  },
+  {
+    name: 'Interbank',
+    type: PaymentMethodType.CREDIT_CARD,
+    aliases: ['interbank crédito'],
+    code: 'IBK',
+    color: '#10B981',
+  },
+  { name: 'BCP', type: PaymentMethodType.CREDIT_CARD, aliases: ['bcp crédito'], code: 'BCP', color: '#F97316' },
+  { name: 'BBVA', type: PaymentMethodType.CREDIT_CARD, aliases: ['bbva crédito'], code: 'BBVA', color: '#3B82F6' },
+  {
+    name: 'Scotiabank',
+    type: PaymentMethodType.CREDIT_CARD,
+    aliases: ['scotia crédito'],
+    code: 'SCO',
+    color: '#EF4444',
+  },
+  {
+    name: 'CMR',
+    type: PaymentMethodType.CREDIT_CARD,
+    aliases: ['cmr', 'falabella', 'cmr falabella'],
+    code: 'CMR',
+    color: '#7C3AED',
+  },
+  { name: 'Oh Pay', type: PaymentMethodType.CREDIT_CARD, aliases: ['oh', 'ohpay'], code: 'OH', color: '#14B8A6' },
+  {
+    name: 'Ripley',
+    type: PaymentMethodType.CREDIT_CARD,
+    aliases: ['ripley', 'banco ripley'],
+    code: 'RIP',
+    color: '#8B5CF6',
+  },
+  {
+    name: 'AMEX',
+    type: PaymentMethodType.CREDIT_CARD,
+    aliases: ['amex', 'american express'],
+    code: 'AMEX',
+    color: '#F59E0B',
+  },
+]
+
 // "Relación de gastos" board: current percentages (36 / 50 / 0 / 14)
 export const BUDGET_GROUPS: BudgetGroupSeed[] = [
   { name: 'Costos Fijos', emoji: '🏠', percentage: 36, order: 1 },
@@ -127,4 +183,9 @@ export const CATEGORIES: CategorySeed[] = [
   { name: 'Comida', color: '#F97316', icon: 'utensils', budgetGroup: 'Gastos sin culpa' },
   { name: 'Transporte', color: '#06B6D4', icon: 'car', budgetGroup: 'Costos Fijos' },
   { name: 'Entretenimiento', color: '#EC4899', icon: 'gamepad-2', budgetGroup: 'Gastos sin culpa' },
+  { name: 'Servicios', color: '#0EA5E9', icon: 'zap', budgetGroup: 'Costos Fijos' },
+  { name: 'Ropa', color: '#A855F7', icon: 'shirt', budgetGroup: 'Gastos sin culpa' },
+  { name: 'Regalos', color: '#F43F5E', icon: 'gift', budgetGroup: 'Gastos sin culpa' },
+  { name: 'Mascotas', color: '#84CC16', icon: 'paw-print', budgetGroup: 'Gastos sin culpa' },
+  { name: 'Viajes', color: '#14B8A6', icon: 'plane', budgetGroup: 'Gastos sin culpa' },
 ]

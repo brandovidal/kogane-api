@@ -8,6 +8,7 @@ import { ApiRest } from '@/commons/decorators/api-rest.decorator'
 import { RequireRole } from '@/commons/decorators/auth.decorator'
 import { ResponseMessage } from '@/commons/decorators/response-message.decorator'
 import { EmptyResponseDto } from '@/commons/helpers/api-response.helper'
+import { deviceOf } from '@/commons/helpers/device.helper'
 import { serializeCookie } from '@/commons/helpers/token.helper'
 import { AuthUser } from '@/generated/prisma/client'
 
@@ -73,7 +74,7 @@ export class UsersController {
     @Req() req: Request & { user: AuthUser },
     @Res({ passthrough: true }) res: Response,
   ) {
-    const { user, token } = await this.authService.impersonate(req.user, id)
+    const { user, token } = await this.authService.impersonate(req.user, id, deviceOf(req))
     res.append(
       'Set-Cookie',
       serializeCookie(SESSION_COOKIE, token, {
