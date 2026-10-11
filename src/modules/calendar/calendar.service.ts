@@ -2,13 +2,22 @@ import { statementBalances } from '@/modules/statements/statement.balance'
 import { Injectable } from '@nestjs/common'
 
 import { APP_TIME_ZONE } from '@/commons/constants/app.constant'
-import { CalendarEventKind, CalendarEventStatus, PaymentOutcome } from '@/commons/constants/calendar.constant'
+import {
+  CalendarEventKind,
+  CalendarEventStatus,
+  PaymentKind,
+  PaymentOutcome,
+} from '@/commons/constants/calendar.constant'
 import { DebtDirection, DebtStatus, toCents } from '@/commons/constants/debt.constant'
 import { NotificationRefType, UNPAID_STATUSES } from '@/commons/constants/notification.constant'
 import { AppException } from '@/commons/exceptions/app.exception'
+import { CatalogItemNotFoundException } from '@/commons/exceptions/catalog/catalog-item-not-found.exception'
+import { PaymentInvalidException } from '@/commons/exceptions/payment/payment-invalid.exception'
 import { DateHelper } from '@/commons/helpers/date.helper'
 import { addMonths, comparePeriods, PaymentPeriod } from '@/commons/helpers/payment-period.helper'
 import { isDue } from '@/commons/helpers/recurring.helper'
+import { AccountDBRepository } from '@/db/models/account/accountDB.repository'
+import { PaymentDBRepository } from '@/db/models/payment/paymentDB.repository'
 import { CalendarDBRepository } from '@/db/models/calendar/calendarDB.repository'
 import { StatementDBRepository } from '@/db/models/statement/statementDB.repository'
 import { DebtsService } from '@/modules/debts/debts.service'
@@ -80,6 +89,15 @@ export function parseCardStatementRef(
 const statusOf = (paid: boolean, date: string, today: string) =>
   paid ? CalendarEventStatus.PAID : date < today ? CalendarEventStatus.LATE : CalendarEventStatus.PENDING
 
+export interface PayDetails {
+  amount?: number
+  kind?: PaymentKind
+  paidAt?: string
+  method?: string
+  accountId?: string
+  note?: string
+}
+
 const outcomeOf = (paid: boolean | null) =>
   paid === null ? PaymentOutcome.NOT_FOUND : paid ? PaymentOutcome.PAID : PaymentOutcome.ALREADY_PAID
 
@@ -93,7 +111,151 @@ export class CalendarService {
     private readonly calendarDBRepository: CalendarDBRepository,
     private readonly debtsService: DebtsService,
     private readonly statementDBRepository: StatementDBRepository,
+    private readonly paymentDBRepository: PaymentDBRepository,
+    private readonly accountDBRepository: AccountDBRepository,
   ) {}
+
+  // ✅ Pagado of the web with its details (amount, day, medio, cuenta de salida, nota). A card statement can be paid in
+  // parts: it stays open (`partial`) until the payments reach what is due. The bot keeps using `pay`
+  async payWithDetails(
+    refType: NotificationRefType | string,
+    refId: string,
+    details: PayDetails,
+  ): Promise<{ outcome: PaymentOutcome; paymentId: string | null }> {
+    if (details.accountId) await this.assertAccount(details.accountId)
+    const paidAtDay = details.paidAt ?? DateHelper.todayIn(APP_TIME_ZONE)
+    const paidAt = new Date(`${paidAtDay}T00:00:00.000Z`)
+    const trace = {
+      paidAt,
+      method: details.method ?? null,
+      accountId: details.accountId ?? null,
+      note: details.note ?? null,
+    }
+    try {
+      switch (refType) {
+        case NotificationRefType.CARD_STATEMENT:
+          return await this.payStatementWithDetails(refId, details, trace)
+        case NotificationRefType.FIXED_COST:
+        case NotificationRefType.SUBSCRIPTION: {
+          const type = refType === NotificationRefType.FIXED_COST ? 'fixed_cost' : 'subscription'
+          const row = await this.calendarDBRepository.findPayable(type, refId)
+          if (!row) return { outcome: PaymentOutcome.NOT_FOUND, paymentId: null }
+          if (!UNPAID_STATUSES.includes(row.paymentStatus)) {
+            return { outcome: PaymentOutcome.ALREADY_PAID, paymentId: null }
+          }
+          const amount = toCents(details.amount ?? row.amount)
+          if (amount <= 0) throw new PaymentInvalidException({ amount })
+          if (amount !== toCents(row.amount)) {
+            await (type === 'fixed_cost'
+              ? this.calendarDBRepository.setFixedCostAmount(refId, amount)
+              : this.calendarDBRepository.setSubscriptionAmount(refId, amount))
+          }
+          await (type === 'fixed_cost'
+            ? this.calendarDBRepository.payFixedCost(refId, paidAt)
+            : this.calendarDBRepository.paySubscription(refId, paidAt))
+          const payment = await this.paymentDBRepository.create({
+            refType,
+            refId,
+            title: row.description,
+            amount,
+            currency: row.currency,
+            kind: PaymentKind.TOTAL,
+            ...trace,
+          })
+          return { outcome: PaymentOutcome.PAID, paymentId: payment.id }
+        }
+        case NotificationRefType.DEBT: {
+          const debt = await this.debtsService.get(refId)
+          if (debt.balance <= 0) return { outcome: PaymentOutcome.ALREADY_PAID, paymentId: null }
+          const amount = toCents(details.amount ?? debt.balance)
+          if (amount <= 0 || amount > toCents(debt.balance)) {
+            throw new PaymentInvalidException({ amount, balance: debt.balance })
+          }
+          await this.debtsService.addPayment(refId, { amount, paidAt, notes: details.note })
+          const payment = await this.paymentDBRepository.create({
+            refType,
+            refId,
+            title: debt.description,
+            amount,
+            currency: debt.currency,
+            kind: amount < toCents(debt.balance) ? PaymentKind.PARTIAL : PaymentKind.TOTAL,
+            ...trace,
+          })
+          return {
+            outcome: amount < toCents(debt.balance) ? PaymentOutcome.PARTIAL : PaymentOutcome.PAID,
+            paymentId: payment.id,
+          }
+        }
+        default:
+          return { outcome: PaymentOutcome.NOT_FOUND, paymentId: null }
+      }
+    } catch (error) {
+      // The expense or debt was deleted after the reminder; a payment that cannot be registered says why
+      if (error instanceof PaymentInvalidException) throw error
+      if (error instanceof AppException) return { outcome: PaymentOutcome.NOT_FOUND, paymentId: null }
+      throw error
+    }
+  }
+
+  private async assertAccount(accountId: string): Promise<void> {
+    const account = await this.accountDBRepository.findById(accountId)
+    if (!account || !account.isActive) throw new CatalogItemNotFoundException({ account: accountId })
+  }
+
+  private async payStatementWithDetails(
+    refId: string,
+    details: PayDetails,
+    trace: { paidAt: Date; method: string | null; accountId: string | null; note: string | null },
+  ): Promise<{ outcome: PaymentOutcome; paymentId: string | null }> {
+    const ref = parseCardStatementRef(refId)
+    if (!ref) return { outcome: PaymentOutcome.NOT_FOUND, paymentId: null }
+    const statement = await this.calendarDBRepository.findCardStatement(ref.paymentMethodId, ref.period, ref.currency)
+    if (!statement) return { outcome: PaymentOutcome.NOT_FOUND, paymentId: null }
+
+    const unpaidRows = toCents(
+      statement.rows
+        .filter((row) => UNPAID_STATUSES.includes(row.paymentStatus))
+        .reduce((sum, row) => sum + row.amount, 0),
+    )
+    if (unpaidRows <= 0) return { outcome: PaymentOutcome.NOTHING_TO_PAY, paymentId: null }
+
+    // The bank's total (when the PDF was read) can be above the registered rows: that is what is really owed
+    const currency = ref.currency ?? statement.rows[0]?.currency ?? 'PEN'
+    const [statements, paid] = await Promise.all([
+      this.statementDBRepository.findForPeriods([ref.period]),
+      this.paymentDBRepository.sumsByRefs(NotificationRefType.CARD_STATEMENT, [refId]),
+    ])
+    const balance = statements
+      .filter((candidate) => candidate.paymentMethodId === ref.paymentMethodId)
+      .flatMap((candidate) => statementBalances(candidate))
+      .find((item) => item.currency === currency)
+    const payable = Math.max(unpaidRows, balance?.totalDue ?? 0)
+    const remaining = toCents(payable - (paid.get(refId) ?? 0))
+
+    let amount = details.amount
+    if (amount === undefined && details.kind === PaymentKind.MINIMUM) {
+      if (!balance?.minimumDue) throw new PaymentInvalidException({ reason: 'minimum payment unknown' })
+      amount = balance.minimumDue
+    }
+    amount = toCents(amount ?? remaining)
+    if (amount <= 0 || amount > remaining) throw new PaymentInvalidException({ amount, remaining })
+
+    const kind = details.kind ?? (amount >= remaining ? PaymentKind.TOTAL : PaymentKind.PARTIAL)
+    const payment = await this.paymentDBRepository.create({
+      refType: NotificationRefType.CARD_STATEMENT,
+      refId,
+      title: statement.name,
+      amount,
+      currency,
+      kind,
+      ...trace,
+    })
+    if (toCents(remaining - amount) <= 0.005) {
+      await this.calendarDBRepository.payCardStatement(ref.paymentMethodId, ref.period, ref.currency)
+      return { outcome: PaymentOutcome.PAID, paymentId: payment.id }
+    }
+    return { outcome: PaymentOutcome.PARTIAL, paymentId: payment.id }
+  }
 
   // ✅ Pagado of a reminder (bot) or of the calendar (web): the unpaid rows of a card statement, a fixed cost, a
   // subscription, or the whole balance of a debt installment
@@ -332,9 +494,10 @@ export class CalendarService {
 
     // A statement is paid up to a month after it closes: the month before `from` may be due inside the range
     const periods = periodsBetween(DateHelper.addDays(from, -31), to)
-    const [rows, statements] = await Promise.all([
+    const [rows, statements, partials] = await Promise.all([
       this.calendarDBRepository.findCardRows(periods),
       this.statementDBRepository.findForPeriods(periods),
+      this.paymentDBRepository.sumsByStatementPeriods(NotificationRefType.CARD_STATEMENT, periods),
     ])
 
     return cards.flatMap((card) =>
@@ -395,7 +558,15 @@ export class CalendarService {
               ...base,
               date: dueDate,
               kind: CalendarEventKind.CARD_DUE,
-              amount: !paid && bankTotal ? bankTotal : unpaid || total,
+              // What was already paid in parts is not owed anymore
+              amount: paid
+                ? unpaid || total
+                : Math.max(
+                    toCents(
+                      (bankTotal ? Math.max(bankTotal, unpaid) : unpaid || total) - (partials.get(base.refId) ?? 0),
+                    ),
+                    0,
+                  ),
               status: statusOf(paid, dueDate, today),
             })
           }

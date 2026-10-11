@@ -1,7 +1,9 @@
 import { createZodDto } from 'nestjs-zod'
 
 import {
+  accountSchema,
   cardHoldersSchema,
+  createAccountSchema,
   statementPasswordSchema,
   budgetGroupSchema,
   categorySchema,
@@ -23,3 +25,6 @@ export class CreateBudgetGroupDto extends createZodDto(budgetGroupSchema) {}
 export class UpdateBudgetGroupDto extends createZodDto(budgetGroupSchema.partial()) {}
 export class CardHoldersDto extends createZodDto(cardHoldersSchema) {}
 export class StatementPasswordDto extends createZodDto(statementPasswordSchema) {}
+
+export class CreateAccountDto extends createZodDto(createAccountSchema) {}
+export class UpdateAccountDto extends createZodDto(accountSchema.partial()) {}

@@ -3,9 +3,14 @@ import { vi } from 'vitest'
 
 import { CalendarEventKind, CalendarEventStatus, PaymentOutcome } from '@/commons/constants/calendar.constant'
 import { DebtDirection, DebtStatus } from '@/commons/constants/debt.constant'
+import { PaymentKind } from '@/commons/constants/calendar.constant'
 import { PaymentStatus } from '@/commons/constants/expense.constant'
 import { NotificationRefType } from '@/commons/constants/notification.constant'
+import { PaymentInvalidException } from '@/commons/exceptions/payment/payment-invalid.exception'
+import { CatalogItemNotFoundException } from '@/commons/exceptions/catalog/catalog-item-not-found.exception'
 import { DebtNotFoundException } from '@/commons/exceptions/debt/debt-not-found.exception'
+import { AccountDBRepository } from '@/db/models/account/accountDB.repository'
+import { PaymentDBRepository } from '@/db/models/payment/paymentDB.repository'
 import { CalendarDBRepository } from '@/db/models/calendar/calendarDB.repository'
 import { StatementDBRepository } from '@/db/models/statement/statementDB.repository'
 import { DebtsService } from '@/modules/debts/debts.service'
@@ -26,7 +31,13 @@ const mockCalendarDB = {
   payCardStatement: vi.fn(),
   payFixedCost: vi.fn(),
   paySubscription: vi.fn(),
+  findCardStatement: vi.fn(),
+  findPayable: vi.fn(),
+  setFixedCostAmount: vi.fn(),
+  setSubscriptionAmount: vi.fn(),
 }
+const mockPayments = { create: vi.fn(), sumsByRefs: vi.fn(), sumsByStatementPeriods: vi.fn() }
+const mockAccounts = { findById: vi.fn() }
 const mockDebts = { get: vi.fn(), addPayment: vi.fn() }
 const mockStatementDB = { findForPeriods: vi.fn() }
 
@@ -58,6 +69,8 @@ describe('CalendarService', () => {
         { provide: CalendarDBRepository, useValue: mockCalendarDB },
         { provide: DebtsService, useValue: mockDebts },
         { provide: StatementDBRepository, useValue: mockStatementDB },
+        { provide: PaymentDBRepository, useValue: mockPayments },
+        { provide: AccountDBRepository, useValue: mockAccounts },
       ],
     }).compile()
     service = module.get(CalendarService)
@@ -70,6 +83,9 @@ describe('CalendarService', () => {
     mockCalendarDB.findDebtsDue.mockResolvedValue([])
     mockCalendarDB.findActiveRecurring.mockResolvedValue([])
     mockStatementDB.findForPeriods.mockResolvedValue([])
+    mockPayments.sumsByStatementPeriods.mockResolvedValue(new Map())
+    mockPayments.sumsByRefs.mockResolvedValue(new Map())
+    mockPayments.create.mockResolvedValue({ id: 'pay1' })
   })
 
   afterEach(() => {
@@ -288,6 +304,128 @@ describe('CalendarService', () => {
       mockDebts.get.mockRejectedValueOnce(new DebtNotFoundException())
       expect(await service.pay(NotificationRefType.DEBT, 'gone')).toBe(PaymentOutcome.NOT_FOUND)
       expect(await service.pay(NotificationRefType.CATEGORY, 'food')).toBe(PaymentOutcome.NOT_FOUND)
+    })
+  })
+
+  describe('payWithDetails', () => {
+    const REF = 'io@2026-09:PEN'
+    const rows = (...amounts: number[]) => ({
+      name: 'IO',
+      rows: amounts.map((amount) => ({ amount, currency: 'PEN', paymentStatus: PaymentStatus.PENDING })),
+    })
+
+    it('should leave a card statement open when it is paid in parts, and close it with the last one', async () => {
+      mockCalendarDB.findCardStatement.mockResolvedValue(rows(300, 200))
+
+      const first = await service.payWithDetails(NotificationRefType.CARD_STATEMENT, REF, {
+        amount: 100,
+        method: 'transfer',
+        paidAt: '2026-09-10',
+      })
+      expect(first).toEqual({ outcome: PaymentOutcome.PARTIAL, paymentId: 'pay1' })
+      expect(mockPayments.create).toHaveBeenCalledWith(
+        expect.objectContaining({ amount: 100, kind: PaymentKind.PARTIAL, method: 'transfer', title: 'IO' }),
+      )
+      expect(mockCalendarDB.payCardStatement).not.toHaveBeenCalled()
+
+      mockPayments.sumsByRefs.mockResolvedValue(new Map([[REF, 100]]))
+      const last = await service.payWithDetails(NotificationRefType.CARD_STATEMENT, REF, {})
+      expect(last.outcome).toBe(PaymentOutcome.PAID)
+      expect(mockPayments.create).toHaveBeenLastCalledWith(
+        expect.objectContaining({ amount: 400, kind: PaymentKind.TOTAL }),
+      )
+      expect(mockCalendarDB.payCardStatement).toHaveBeenCalledWith('io', { paymentMonth: 9, paymentYear: 2026 }, 'PEN')
+    })
+
+    it('should take the minimum of the bank statement and use its total when it is above the rows', async () => {
+      mockCalendarDB.findCardStatement.mockResolvedValue(rows(300))
+      mockStatementDB.findForPeriods.mockResolvedValue([
+        { paymentMethodId: 'io', balances: [{ currency: 'PEN', totalDue: 350, minimumDue: 80 }] },
+      ])
+
+      const minimum = await service.payWithDetails(NotificationRefType.CARD_STATEMENT, REF, {
+        kind: PaymentKind.MINIMUM,
+      })
+      expect(minimum.outcome).toBe(PaymentOutcome.PARTIAL)
+      expect(mockPayments.create).toHaveBeenCalledWith(
+        expect.objectContaining({ amount: 80, kind: PaymentKind.MINIMUM }),
+      )
+
+      await expect(
+        service.payWithDetails(NotificationRefType.CARD_STATEMENT, REF, { amount: 351 }),
+      ).rejects.toBeInstanceOf(PaymentInvalidException)
+    })
+
+    it('should say there is nothing to pay on a statement already paid', async () => {
+      mockCalendarDB.findCardStatement.mockResolvedValue({
+        name: 'IO',
+        rows: [{ amount: 50, currency: 'PEN', paymentStatus: PaymentStatus.PAID }],
+      })
+      mockCalendarDB.findCardStatement.mockResolvedValueOnce(null)
+
+      expect((await service.payWithDetails(NotificationRefType.CARD_STATEMENT, REF, {})).outcome).toBe(
+        PaymentOutcome.NOT_FOUND,
+      )
+      expect((await service.payWithDetails(NotificationRefType.CARD_STATEMENT, REF, {})).outcome).toBe(
+        PaymentOutcome.NOTHING_TO_PAY,
+      )
+    })
+
+    it('should replace the amount of a fixed cost when the real one differs', async () => {
+      mockCalendarDB.findPayable.mockResolvedValue({
+        description: 'Luz',
+        amount: 100,
+        currency: 'PEN',
+        paymentStatus: PaymentStatus.PENDING,
+      })
+
+      const result = await service.payWithDetails(NotificationRefType.FIXED_COST, 'f1', {
+        amount: 120.5,
+        note: 'recibo',
+      })
+      expect(result).toEqual({ outcome: PaymentOutcome.PAID, paymentId: 'pay1' })
+      expect(mockCalendarDB.setFixedCostAmount).toHaveBeenCalledWith('f1', 120.5)
+      expect(mockCalendarDB.payFixedCost).toHaveBeenCalledWith('f1', expect.any(Date))
+      expect(mockPayments.create).toHaveBeenCalledWith(expect.objectContaining({ amount: 120.5, note: 'recibo' }))
+    })
+
+    it('should not touch a subscription that is already paid or gone', async () => {
+      mockCalendarDB.findPayable.mockResolvedValueOnce(null).mockResolvedValueOnce({
+        description: 'Netflix',
+        amount: 10,
+        currency: 'PEN',
+        paymentStatus: PaymentStatus.PAID,
+      })
+
+      expect((await service.payWithDetails(NotificationRefType.SUBSCRIPTION, 's1', {})).outcome).toBe(
+        PaymentOutcome.NOT_FOUND,
+      )
+      expect((await service.payWithDetails(NotificationRefType.SUBSCRIPTION, 's1', {})).outcome).toBe(
+        PaymentOutcome.ALREADY_PAID,
+      )
+      expect(mockPayments.create).not.toHaveBeenCalled()
+    })
+
+    it('should pay part of a debt installment and reject more than its balance', async () => {
+      mockDebts.get.mockResolvedValue({ balance: 150, description: 'Cena', currency: 'PEN' })
+
+      const partial = await service.payWithDetails(NotificationRefType.DEBT, 'd1', { amount: 50, note: 'yape' })
+      expect(partial.outcome).toBe(PaymentOutcome.PARTIAL)
+      expect(mockDebts.addPayment).toHaveBeenCalledWith('d1', { amount: 50, paidAt: expect.any(Date), notes: 'yape' })
+      await expect(service.payWithDetails(NotificationRefType.DEBT, 'd1', { amount: 151 })).rejects.toBeInstanceOf(
+        PaymentInvalidException,
+      )
+    })
+
+    it('should reject an account that does not exist or is inactive before paying anything', async () => {
+      mockAccounts.findById.mockResolvedValueOnce(null).mockResolvedValueOnce({ id: 'a1', isActive: false })
+
+      for (let attempt = 0; attempt < 2; attempt++) {
+        await expect(
+          service.payWithDetails(NotificationRefType.FIXED_COST, 'f1', { accountId: 'a1' }),
+        ).rejects.toBeInstanceOf(CatalogItemNotFoundException)
+      }
+      expect(mockPayments.create).not.toHaveBeenCalled()
     })
   })
 })
