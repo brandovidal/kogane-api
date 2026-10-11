@@ -26,6 +26,7 @@ export const AUDITED_TABLES = [
   'exp_recurring_expenses',
   'exp_debts',
   'exp_debt_payments',
+  'exp_payments',
   'exp_commitments',
   'exp_contributions',
   'exp_person_summaries',
@@ -36,6 +37,7 @@ export const AUDITED_TABLES = [
   'bud_settings',
   'cat_people',
   'cat_payment_methods',
+  'cat_accounts',
   'cat_card_holders',
   'cat_categories',
   'ntf_settings',
@@ -67,6 +69,8 @@ export const AUDIT_TITLE_COLUMN: Record<string, string> = {
   bud_incomes: 'description',
   cat_people: 'name',
   cat_payment_methods: 'name',
+  cat_accounts: 'name',
+  exp_payments: 'title',
   cat_categories: 'name',
 }
 

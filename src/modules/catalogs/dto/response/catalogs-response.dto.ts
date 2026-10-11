@@ -6,6 +6,7 @@ import {
   budgetGroupResponseSchema,
   cardHolderResponseSchema,
   categoryResponseSchema,
+  accountResponseSchema,
   paymentMethodResponseSchema,
   personResponseSchema,
 } from '../../validations/catalogs.validation'
@@ -19,3 +20,6 @@ export class CategoryListResponseDto extends responseDto(z.array(categoryRespons
 export class BudgetGroupResponseDto extends responseDto(budgetGroupResponseSchema) {}
 export class BudgetGroupListResponseDto extends responseDto(z.array(budgetGroupResponseSchema)) {}
 export class CardHolderListResponseDto extends responseDto(z.array(cardHolderResponseSchema)) {}
+
+export class AccountResponseDto extends responseDto(accountResponseSchema) {}
+export class AccountListResponseDto extends responseDto(z.array(accountResponseSchema)) {}

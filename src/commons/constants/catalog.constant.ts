@@ -11,3 +11,10 @@ export enum CardHolderRole {
   TITULAR = 'titular',
   ADDITIONAL = 'additional',
 }
+
+// Cuentas de salida: where the money leaves from when something is paid (a catalog, no balance)
+export enum AccountType {
+  BANK_ACCOUNT = 'bank_account',
+  WALLET = 'wallet', // Yape, Plin, Lemon…
+  CASH = 'cash',
+}

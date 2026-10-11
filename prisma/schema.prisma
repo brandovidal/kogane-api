@@ -107,6 +107,51 @@ model CardHolder {
   @@map("cat_card_holders")
 }
 
+// Cuentas de salida: where the money leaves from when something is paid (BCP, Yape, efectivo). A catalog, not a ledger:
+// it keeps no balance. Deactivated, never deleted: payments point to it
+model Account {
+  id        String   @id @default(cuid())
+  userId    String? // whose row it is (P23, D82): set and filtered by the tenancy extension
+  name      String
+  type      String // AccountType: bank_account · wallet · cash
+  bank      String? // bank accounts: the bank that holds it
+  currency  String   @default("PEN")
+  color     String?
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  payments Payment[]
+
+  @@unique([userId, name])
+  @@index([userId])
+  @@map("cat_accounts")
+}
+
+// What was registered when something was paid from the calendar or the dashboard: amount, day, how and from which
+// account. The paid status stays in its own table; this is the trace (a card statement paid in parts has several)
+model Payment {
+  id        String   @id @default(cuid())
+  userId    String? // whose row it is (P23, D82): set and filtered by the tenancy extension
+  refType   String // NotificationRefType: card_statement · fixed_cost · subscription · debt
+  refId     String
+  title     String // name of what was paid, kept so the history reads even if the record is deleted
+  amount    Float
+  currency  String   @default("PEN")
+  kind      String // PaymentKind: total · minimum · partial
+  paidAt    DateTime
+  method    String? // PayMethod: transfer · cash · wallet · debit_card · other
+  accountId String?
+  account   Account? @relation(fields: [accountId], references: [id], onDelete: SetNull)
+  note      String?
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([refType, refId])
+  @@index([accountId])
+  @@map("exp_payments")
+}
+
 model Category {
   id            String       @id @default(cuid())
   userId        String? // whose row it is (P23, D82): set and filtered by the tenancy extension
