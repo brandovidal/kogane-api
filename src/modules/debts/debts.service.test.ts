@@ -250,7 +250,10 @@ describe('DebtsService', () => {
     const newer = buildDebt({ id: 'b', amount: 200, paidAmount: 0, paymentMonth: 9 })
     const done = buildDebt({ id: 'c', amount: 50, paidAmount: 50, status: DebtStatus.PAID })
 
-    beforeEach(() => mockRepository.findByIds.mockResolvedValue([open, newer, done]))
+    beforeEach(() => {
+      mockRepository.findByIds.mockResolvedValue([open, newer, done])
+      mockRepository.payMany.mockResolvedValue({ debts: [], paymentIds: ['p1', 'p2'] })
+    })
 
     it('should pay the balance of each open one with the kind of the action and skip the ones already paid', async () => {
       const result = await service.bulk({ ids: ['a', 'b', 'c'], action: DebtBulkAction.CASHBACK })
@@ -262,7 +265,9 @@ describe('DebtsService', () => {
         ],
         expect.objectContaining({ kind: DebtPaymentKind.CASHBACK }),
       )
-      expect(result).toEqual(expect.objectContaining({ affected: 2, paid: 500, skipped: ['c'] }))
+      expect(result).toEqual(
+        expect.objectContaining({ affected: 2, paid: 500, skipped: ['c'], paymentIds: ['p1', 'p2'] }),
+      )
     })
 
     it('should spread an abono over the oldest first and give back what is left', async () => {

@@ -60,6 +60,7 @@ describe('Cobros: bulk actions and card check (integration)', () => {
 
     const abono = await service.bulk({ ids, action: DebtBulkAction.PARTIAL, amount: 200 })
     expect(abono).toEqual(expect.objectContaining({ affected: 2, paid: 200, excess: 0 }))
+    expect(abono.paymentIds).toHaveLength(2)
     const afterAbono = await service.list({ personId, year: 2031 })
     // paid today, before its month of 2031: Amortizado (D60)
     expect(afterAbono.map((row) => [row.status, row.balance])).toEqual([

@@ -192,6 +192,46 @@ export function collectMonthNotice(
   }
 }
 
+// "Recordar pago" on cobros: what the selected installments of one person leave pending, ready to send them
+export function collectReminderNotice(
+  person: { id: string; name: string },
+  debts: CollectDebt[],
+  today: string,
+): NotificationDraft {
+  const total = penTotal(debts)
+  return {
+    kind: NotificationKind.COLLECT,
+    title: `🔔 Recordar pago a ${person.name}: ${pen(total)}`,
+    body: [
+      `Hola ${person.name} 👋, te recuerdo lo pendiente:`,
+      ...collectLines(debts, true),
+      `Total: ${pen(total)}`,
+    ].join('\n'),
+    amount: total,
+    refType: NotificationRefType.DEBT,
+    refId: person.id,
+    dedupeKey: `remind-collect:${person.id}:${today}`,
+  }
+}
+
+// "Recordar pago" on debts I owe: a reminder for me, with what is left to pay that person
+export function payReminderNotice(
+  person: { id: string; name: string },
+  debts: CollectDebt[],
+  today: string,
+): NotificationDraft {
+  const total = penTotal(debts)
+  return {
+    kind: NotificationKind.COLLECT,
+    title: `💸 Recuerda pagar a ${person.name}: ${pen(total)}`,
+    body: [`Lo que le debes a ${person.name}:`, ...collectLines(debts, true), `Total: ${pen(total)}`].join('\n'),
+    amount: total,
+    refType: NotificationRefType.DEBT,
+    refId: person.id,
+    dedupeKey: `remind-pay:${person.id}:${today}`,
+  }
+}
+
 // Day 5, 09:00: what one person still owes from earlier months
 export function collectLateNotice(
   person: { id: string; name: string },

@@ -10,6 +10,7 @@
   },
   "scripts": {
     "dev": "dotenv -e .env.dev -- nest start --watch",
+    "qa": "dotenv -e .env.qa -- nest start --watch",
     "build": "nest build",
     "start:prod": "node dist/main",
     "lint": "eslint \"src/**/*.ts\"",

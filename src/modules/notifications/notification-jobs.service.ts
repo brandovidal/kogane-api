@@ -21,7 +21,9 @@ import { StoredFilesService } from '@/modules/stored-files/stored-files.service'
 import {
   budgetNotice,
   collectLateNotice,
+  collectReminderNotice,
   collectMonthNotice,
+  payReminderNotice,
   dailyCloseNotice,
   dueNotice,
   duplicateNotice,
@@ -103,22 +105,79 @@ export class NotificationJobsService {
   // per person, so each can be forwarded as it is
   private async collect(job: NotificationJob, today: string, late: boolean): Promise<JobResult> {
     const { paymentMonth: month, paymentYear: year } = periodOf(today)
+    return this.sendCollect(job, { month, year, late })
+  }
+
+  // "Cobrar a todos por Mensajes" (Resumen): the same notices as the schedule, for any month and only for some
+  // people, sent now. Once per person and day, so a second click the same day sends nothing twice
+  async collectNow(
+    { month, year, late = false, personIds }: { month: number; year: number; late?: boolean; personIds?: string[] },
+    now: Date = new Date(),
+  ): Promise<JobResult> {
+    const today = DateHelper.todayIn(APP_TIME_ZONE, now)
+    return this.sendCollect(late ? NotificationJob.COLLECT_LATE : NotificationJob.COLLECT_MONTH, {
+      month,
+      year,
+      late,
+      personIds,
+      manualDay: today,
+    })
+  }
+
+  private async sendCollect(
+    job: NotificationJob,
+    {
+      month,
+      year,
+      late,
+      personIds,
+      manualDay,
+    }: { month: number; year: number; late: boolean; personIds?: string[]; manualDay?: string },
+  ): Promise<JobResult> {
     const previous = addMonths({ paymentMonth: month, paymentYear: year }, -1)
     const debts = (
       await this.debtsService.list({
         direction: DebtDirection.OWED_TO_ME,
         ...(late ? { month: previous.paymentMonth, year: previous.paymentYear, until: true } : { month, year }),
       })
-    ).filter((debt) => debt.balance > 0)
+    ).filter((debt) => debt.balance > 0 && (!personIds || personIds.includes(debt.personId)))
 
     const byPerson = new Map<string, typeof debts>()
     debts.forEach((debt) => byPerson.set(debt.personId, [...(byPerson.get(debt.personId) ?? []), debt]))
     let created = 0
     for (const owed of byPerson.values()) {
-      const notice = late ? collectLateNotice : collectMonthNotice
-      created += await this.notify(notice(owed[0].person, owed, month, year))
+      const notice = (late ? collectLateNotice : collectMonthNotice)(owed[0].person, owed, month, year)
+      created += await this.notify(
+        manualDay ? { ...notice, dedupeKey: `${notice.dedupeKey}:now:${manualDay}` } : notice,
+      )
     }
     return { job, notifications: created, details: { people: byPerson.size } }
+  }
+
+  // "Recordar pago" on the selected debts: one notice per person and direction (cobros: the text to send them;
+  // deudas: a reminder for me). Paid ones are left out
+  async remindDebts(ids: string[], now: Date = new Date()): Promise<JobResult> {
+    const today = DateHelper.todayIn(APP_TIME_ZONE, now)
+    const debts = (await this.debtsService.listByIds(ids)).filter((debt) => debt.balance > 0)
+    const groups = new Map<string, typeof debts>()
+    debts.forEach((debt) => {
+      const key = `${debt.direction}:${debt.personId}`
+      groups.set(key, [...(groups.get(key) ?? []), debt])
+    })
+    let created = 0
+    for (const group of groups.values()) {
+      const { person, direction } = group[0]
+      created += await this.notify(
+        direction === DebtDirection.OWED_TO_ME
+          ? collectReminderNotice(person, group, today)
+          : payReminderNotice(person, group, today),
+      )
+    }
+    return {
+      job: NotificationJob.COLLECT_MONTH,
+      notifications: created,
+      details: { people: groups.size, skipped: ids.length - debts.length },
+    }
   }
 
   // Day 1, 06:00 (D88): the pending rows of the month, and one notice that lists them

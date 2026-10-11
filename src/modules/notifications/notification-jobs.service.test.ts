@@ -25,7 +25,7 @@ const mockCalendarDB = { findSubscriptions: vi.fn() }
 const mockExpenseDB = { findChargesBetween: vi.fn(), findChargesCreatedSince: vi.fn() }
 const mockPersonDB = { findDefault: vi.fn() }
 const mockBudget = { byCategory: vi.fn(), month: vi.fn() }
-const mockDebts = { summary: vi.fn(), list: vi.fn() }
+const mockDebts = { summary: vi.fn(), list: vi.fn(), listByIds: vi.fn() }
 const mockRecurring = { generate: vi.fn() }
 const mockStoredFiles = { deleteExpired: vi.fn() }
 
@@ -251,6 +251,48 @@ describe('NotificationJobsService', () => {
         expect.objectContaining({
           dedupeKey: 'collect-late:dany:2026-10',
           title: '⏰ Danery tiene S/ 100.00 atrasados',
+        }),
+      )
+    })
+    it('should send now the cobros of a month only to the chosen people, once per person and day', async () => {
+      mockDebts.list.mockResolvedValue([
+        debt({}),
+        debt({ personId: 'dora', person: { id: 'dora', name: 'Dora' }, balance: 50 }),
+      ])
+
+      const result = await service.collectNow(
+        { month: 9, year: 2026, personIds: ['dany'] },
+        new Date('2026-10-10T14:00:00Z'),
+      )
+
+      expect(mockDebts.list).toHaveBeenCalledWith({ direction: 'owed_to_me', month: 9, year: 2026 })
+      expect(result).toEqual(expect.objectContaining({ notifications: 1, details: { people: 1 } }))
+      expect(mockNotifications.notify).toHaveBeenCalledTimes(1)
+      expect(mockNotifications.notify).toHaveBeenCalledWith(
+        expect.objectContaining({ dedupeKey: 'collect:dany:2026-09:now:2026-10-10' }),
+      )
+    })
+
+    it('should remind each person the selected debts that are still open, cobros and deudas apart', async () => {
+      mockDebts.listByIds.mockResolvedValue([
+        debt({ direction: 'owed_to_me' }),
+        debt({ direction: 'owed_to_me', description: 'Cine', installment: null, balance: 30 }),
+        debt({ direction: 'owed_to_me', description: 'Pagada', balance: 0 }),
+        debt({ direction: 'i_owe', personId: 'dora', person: { id: 'dora', name: 'Dora' }, balance: 80 }),
+      ])
+
+      const result = await service.remindDebts(['a', 'b', 'c', 'd'], new Date('2026-10-10T14:00:00Z'))
+
+      expect(result).toEqual(expect.objectContaining({ notifications: 2, details: { people: 2, skipped: 1 } }))
+      const [owed, owe] = mockNotifications.notify.mock.calls.map(([input]) => input)
+      expect(owed).toEqual(
+        expect.objectContaining({ amount: 130, dedupeKey: 'remind-collect:dany:2026-10-10', refId: 'dany' }),
+      )
+      expect(owe).toEqual(
+        expect.objectContaining({
+          amount: 80,
+          dedupeKey: 'remind-pay:dora:2026-10-10',
+          title: expect.stringContaining('Recuerda pagar'),
         }),
       )
     })

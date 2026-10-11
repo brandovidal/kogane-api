@@ -20,7 +20,7 @@ export const OBJECT_STORAGE = Symbol('OBJECT_STORAGE')
         const { env, r2AccountId, r2AccessKeyId, r2SecretAccessKey, r2Bucket, localDir } = config
 
         if (!Object.values<string | undefined>(StorageEnv).includes(env)) {
-          throw new Error('STORAGE_ENV must be dev, prod or test (the parent folder of the files in R2)')
+          throw new Error('STORAGE_ENV must be dev, qa, prod or test (the parent folder of the files in R2)')
         }
         // Tests never call R2 (like the AI): files go to a git-ignored folder
         if (env === StorageEnv.TEST) return new LocalStorage(localDir)

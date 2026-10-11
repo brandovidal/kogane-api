@@ -4,7 +4,9 @@
 
 # Where the invitation links point (the web of each environment); APP_URL=<url> on the command line overrides it
 PROD_APP_URL := https://kogane-app.brandovidal.workers.dev
-APP_URL ?= $(if $(filter prod,$(ENV)),$(PROD_APP_URL),http://localhost:4000)
+# qa: the APP_URL of .env.qa
+ENV_APP_URL = $(shell grep -E '^APP_URL=' $(ENV_FILE) 2>/dev/null | cut -d= -f2- | tr -d '"' | sed 's:/*$$::')
+APP_URL ?= $(if $(filter prod,$(ENV)),$(PROD_APP_URL),$(if $(filter qa,$(ENV)),$(ENV_APP_URL),http://localhost:4000))
 
 superadmin: env-file ## Create or promote a superadmin: EMAIL=<email> [NAME=] [PHONE=] [DNI=] [SEND=yes] [ENV=prod]; prints a link to define a password
 	@test -n "$(EMAIL)" || (echo "Usage: make superadmin EMAIL=<email> [NAME=<name>]"; exit 1)
