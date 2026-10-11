@@ -30,17 +30,27 @@ const customLogLevel = (_req: IncomingMessage, res: { statusCode: number }, err?
   return 'info'
 }
 
+const isPrettyInstalled = (): boolean => {
+  try {
+    require.resolve('pino-pretty')
+    return true
+  } catch {
+    return false
+  }
+}
+
 // Pretty logs locally, plain JSON on stdout elsewhere
-const transport: TransportSingleOptions | undefined = isDev
-  ? {
-      target: 'pino-pretty',
-      options: {
-        colorize: true,
-        singleLine: true,
-        ignore: LOGGER_TRANSPORT_OPTION_IGNORE,
-      },
-    }
-  : undefined
+const transport: TransportSingleOptions | undefined =
+  isDev && isPrettyInstalled()
+    ? {
+        target: 'pino-pretty',
+        options: {
+          colorize: true,
+          singleLine: true,
+          ignore: LOGGER_TRANSPORT_OPTION_IGNORE,
+        },
+      }
+    : undefined
 
 @Global()
 @Module({
