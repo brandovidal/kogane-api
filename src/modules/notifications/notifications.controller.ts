@@ -19,8 +19,10 @@ import { ResponseMessage } from '@/commons/decorators/response-message.decorator
 import { EmptyResponseDto } from '@/commons/helpers/api-response.helper'
 
 import {
+  CollectNowDto,
   NotificationListQueryDto,
   RecentNotificationsQueryDto,
+  RemindDebtsDto,
   RemindersQueryDto,
   UpdateNotificationSettingsDto,
 } from './dto/request/notifications.dto'
@@ -120,6 +122,26 @@ export class NotificationsController {
   @ResponseMessage('NOTIFICATION_JOB_DONE', 'Job done')
   run(@Param('job', new ParseEnumPipe(NotificationJob)) job: NotificationJob) {
     return this.notificationJobsService.run(job)
+  }
+
+  @Post('collect')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Cobrar por Mensajes: send now the cobros notices of a month (one per person), once per person and day',
+  })
+  @ApiOkResponse({ type: JobResultResponseDto })
+  @ResponseMessage('NOTIFICATION_COLLECT_SENT', 'Cobros sent')
+  collect(@Body() body: CollectNowDto) {
+    return this.notificationJobsService.collectNow(body)
+  }
+
+  @Post('remind-debts')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Recordar pago: one reminder per person for the selected debts; paid ones are left out' })
+  @ApiOkResponse({ type: JobResultResponseDto })
+  @ResponseMessage('NOTIFICATION_DEBTS_REMINDED', 'Reminders sent')
+  remindDebts(@Body() { ids }: RemindDebtsDto) {
+    return this.notificationJobsService.remindDebts(ids)
   }
 }
 

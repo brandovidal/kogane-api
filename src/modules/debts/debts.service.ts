@@ -91,6 +91,12 @@ export class DebtsService {
     return debts.map((debt) => this.toView(debt))
   }
 
+  // The given debts with their person and balance (the notices of "Recordar pago")
+  async listByIds(ids: string[]): Promise<DebtView[]> {
+    const debts = await this.debtDBRepository.findByIds(ids)
+    return debts.map((debt) => this.toView(debt))
+  }
+
   async findOpen(personId?: string, direction?: DebtDirection): Promise<DebtView[]> {
     const debts = await this.debtDBRepository.findOpen({ personId, direction })
     return debts.map((debt) => this.toView(debt))
@@ -181,7 +187,7 @@ export class DebtsService {
   // Selección múltiple (D115): one action over several debts
   async bulk({ ids, action, amount, paidAt, paymentMethodId, month, year, force }: DebtBulkDto) {
     const debts = await this.debtDBRepository.findByIds(ids)
-    const result = { action, affected: 0, paid: 0, excess: 0, skipped: [] as string[] }
+    const result = { action, affected: 0, paid: 0, excess: 0, skipped: [] as string[], paymentIds: [] as string[] }
     const open = debts.filter((debt) => balanceOf(debt) > 0)
     const payment = { paidAt: paidAt ?? new Date(), paymentMethodId: paymentMethodId ?? null }
 
@@ -191,14 +197,18 @@ export class DebtsService {
       case DebtBulkAction.CASHBACK: {
         result.skipped = debts.filter((debt) => balanceOf(debt) <= 0).map((debt) => debt.id)
         const allocations = open.map((debt) => ({ debtId: debt.id, amount: balanceOf(debt) }))
-        await this.debtDBRepository.payMany(allocations, { ...payment, kind: KIND_OF_ACTION[action]! })
+        result.paymentIds = (
+          await this.debtDBRepository.payMany(allocations, { ...payment, kind: KIND_OF_ACTION[action]! })
+        ).paymentIds
         result.affected = allocations.length
         result.paid = toCents(allocations.reduce((sum, item) => sum + item.amount, 0))
         break
       }
       case DebtBulkAction.PARTIAL: {
         const { allocations, excess } = allocatePayment(open, amount!)
-        await this.debtDBRepository.payMany(allocations, { ...payment, kind: DebtPaymentKind.PARTIAL })
+        result.paymentIds = (
+          await this.debtDBRepository.payMany(allocations, { ...payment, kind: DebtPaymentKind.PARTIAL })
+        ).paymentIds
         result.affected = allocations.length
         result.paid = toCents(allocations.reduce((sum, item) => sum + item.amount, 0))
         result.excess = excess

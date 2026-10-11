@@ -21,6 +21,21 @@ export const remindersQuerySchema = z.object({
   days: z.coerce.number().int().min(1).max(45).default(14),
 })
 
+// "Cobrar a todos por Mensajes": the cobros of a month (or the late ones before it), for some people or all
+export const collectNowSchema = z.object({
+  month: z.number().int().min(1).max(12),
+  year: z.number().int().min(2000).max(2100),
+  late: z.boolean().optional().describe('The installments of the months before, not the ones of this month'),
+  personIds: z
+    .array(z.string())
+    .min(1)
+    .optional()
+    .describe('Only these people; every person with a balance when empty'),
+})
+
+// "Recordar pago": the selected debts
+export const remindDebtsSchema = z.object({ ids: z.array(z.string()).min(1).max(200) })
+
 const channelSettings = z.object({ telegram: z.boolean(), web: z.boolean() })
 
 // Only the kinds that change; each one with the channels that change
