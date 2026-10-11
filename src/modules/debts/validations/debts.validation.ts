@@ -180,6 +180,11 @@ export const debtBulkResponseSchema = z.object({
   paid: z.number().describe('Amount registered as payments'),
   excess: z.number().describe('partial: what was left over after every balance'),
   skipped: z.array(z.string()).describe('Debts left out: already paid, or with payments on delete without force'),
+  paymentIds: z
+    .array(z.string())
+    .describe(
+      'The payments created (pay, prepaid, cashback, partial): attach a Comprobante to each with refType debt_payment',
+    ),
 })
 
 // "Arrastrar saldos pendientes al mes en curso": the open installments of earlier months move to the target month,

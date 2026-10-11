@@ -86,9 +86,10 @@ export class DebtDBRepository {
   payMany(
     allocations: PaymentAllocation[],
     { paidAt, kind, paymentMethodId }: { paidAt: Date; kind: string; paymentMethodId: string | null },
-  ): Promise<Debt[]> {
+  ): Promise<{ debts: Debt[]; paymentIds: string[] }> {
     return this.prisma.$transaction(async (tx) => {
-      await tx.debtPayment.createMany({
+      const payments = await tx.debtPayment.createManyAndReturn({
+        select: { id: true },
         data: allocations.map(({ debtId, amount }) => ({
           debtId,
           amount,
@@ -98,7 +99,8 @@ export class DebtDBRepository {
           confirmedAt: new Date(),
         })),
       })
-      return Promise.all(allocations.map(({ debtId }) => this.recompute(tx, debtId)))
+      const debts = await Promise.all(allocations.map(({ debtId }) => this.recompute(tx, debtId)))
+      return { debts, paymentIds: payments.map((payment) => payment.id) }
     })
   }
 
