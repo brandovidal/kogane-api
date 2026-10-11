@@ -1035,6 +1035,8 @@ model AuthSession {
   user             AuthUser @relation(fields: [userId], references: [id], onDelete: Cascade)
   tokenHash        String   @unique
   impersonatedById String? // the superadmin who entered as this user (the backdoor of D84): the history says so
+  userAgent        String? // what the browser said it was (Perfil ▸ Dispositivos); never used to decide anything
+  ipAddress        String?
   expiresAt        DateTime
   lastSeenAt       DateTime @default(now())
   createdAt        DateTime @default(now())

@@ -146,3 +146,29 @@ export const createdInviteSchema = inviteSchema.extend({
 })
 
 export const usersListSchema = z.object({ users: z.array(sessionUserSchema), invites: z.array(inviteSchema) })
+
+// ==================== Devices (Perfil ▸ Dispositivos) ====================
+
+export const revokeSessionsSchema = z.object({
+  ids: z.array(z.string().min(1)).min(1).max(50).describe('Ids of your own sessions (from GET /v1/auth/sessions)'),
+})
+
+export const deviceSessionSchema = z.object({
+  id: z.string(),
+  browser: z.string().describe('Chrome, Safari, Firefox…'),
+  os: z.string().describe('macOS, iOS, Windows, Android…'),
+  kind: z.enum(['desktop', 'mobile', 'tablet', 'unknown']),
+  ipAddress: z.string().nullable(),
+  createdAt: dateTimeSchema.describe('When it was opened'),
+  lastSeenAt: dateTimeSchema.describe('Last use (written every few minutes)'),
+  expiresAt: dateTimeSchema,
+  current: z.boolean().describe('The session of this very request'),
+  impersonated: z.boolean().describe('Opened by a superadmin entering as this user (the backdoor)'),
+})
+
+export const deviceSessionsSchema = z.object({ sessions: z.array(deviceSessionSchema) })
+
+export const revokedSessionsSchema = z.object({
+  revoked: z.number().int().describe('How many sessions were closed'),
+  closedCurrent: z.boolean().describe('True when the session of this request was among them: the cookie is cleared'),
+})

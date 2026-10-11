@@ -12,6 +12,7 @@ import { NotInvitedException } from '@/commons/exceptions/auth/not-invited.excep
 import { TooManyAttemptsException } from '@/commons/exceptions/auth/too-many-attempts.exception'
 import { UserDisabledException } from '@/commons/exceptions/auth/user-disabled.exception'
 import { WeakPasswordException } from '@/commons/exceptions/auth/weak-password.exception'
+import { SessionNotFoundException } from '@/commons/exceptions/auth/session-not-found.exception'
 import { ForbiddenRoleException } from '@/commons/exceptions/auth/forbidden-role.exception'
 import { hashPassword } from '@/commons/helpers/password.helper'
 import { hashToken } from '@/commons/helpers/token.helper'
@@ -32,6 +33,9 @@ const mockDB = {
   findSession: vi.fn(),
   deleteSession: vi.fn(),
   deleteSessionsOf: vi.fn(),
+  deleteSessionsWhere: vi.fn(),
+  listSessionsOf: vi.fn(),
+  touchSession: vi.fn(),
   deleteExpiredSessions: vi.fn(),
   findInviteByHash: vi.fn(),
   findPendingInviteByEmail: vi.fn(),
@@ -92,7 +96,7 @@ describe('AuthService', () => {
       const { token } = await service.login('Brando@Example.com', 'una-clave-larga')
 
       expect(mockDB.findUserByEmail).toHaveBeenCalledWith('brando@example.com')
-      expect(mockDB.createSession).toHaveBeenCalledWith('u1', hashToken(token), expect.any(Date))
+      expect(mockDB.createSession).toHaveBeenCalledWith('u1', hashToken(token), expect.any(Date), null, null)
       expect(mockDB.clearAttempts).toHaveBeenCalledWith('brando@example.com')
     })
 
@@ -235,6 +239,8 @@ describe('AuthService', () => {
 
   describe('sessions', () => {
     const found = (overrides: Record<string, unknown> = {}) => ({
+      id: 's1',
+      lastSeenAt: new Date(),
       expiresAt: new Date(Date.now() + 60_000),
       impersonatedById: null,
       user: user(),
@@ -270,6 +276,92 @@ describe('AuthService', () => {
     })
   })
 
+  describe('devices (Perfil ▸ Dispositivos)', () => {
+    const CHROME_MAC =
+      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36'
+    const row = (id: string, token: string, overrides: Record<string, unknown> = {}) => ({
+      id,
+      tokenHash: hashToken(token),
+      userAgent: CHROME_MAC,
+      ipAddress: '190.1.2.3',
+      impersonatedById: null,
+      createdAt: new Date('2026-10-01T10:00:00Z'),
+      lastSeenAt: new Date('2026-10-11T10:00:00Z'),
+      expiresAt: new Date('2026-11-01T10:00:00Z'),
+      ...overrides,
+    })
+
+    it('should remember where a session was opened', async () => {
+      mockDB.findUserByEmail.mockResolvedValue(user({ passwordHash: await hashPassword('secret-123') }))
+      mockDB.updateUser.mockResolvedValue(user())
+      const device = { userAgent: CHROME_MAC, ipAddress: '190.1.2.3' }
+
+      await service.login('brando@example.com', 'secret-123', device)
+
+      expect(mockDB.createSession).toHaveBeenCalledWith('u1', expect.any(String), expect.any(Date), null, device)
+    })
+
+    it('should list the open sessions with a readable device and mark the current one', async () => {
+      mockDB.listSessionsOf.mockResolvedValue([row('s1', 'mine'), row('s2', 'phone', { impersonatedById: 'root' })])
+
+      const list = await service.listSessions('u1', 'mine')
+
+      expect(list).toEqual([
+        expect.objectContaining({ id: 's1', browser: 'Chrome', os: 'macOS', kind: 'desktop', current: true }),
+        expect.objectContaining({ id: 's2', current: false, impersonated: true }),
+      ])
+      expect(list[0]).not.toHaveProperty('tokenHash')
+    })
+
+    it('should revoke only what was asked, forget it at once and say when it was the current session', async () => {
+      mockDB.findSession.mockResolvedValue({
+        id: 's2',
+        lastSeenAt: new Date(),
+        expiresAt: new Date(Date.now() + 60_000),
+        impersonatedById: null,
+        user: user(),
+      })
+      await service.validateSession('phone')
+      mockDB.deleteSessionsWhere.mockResolvedValue([hashToken('phone')])
+
+      const result = await service.revokeSessions('u1', ['s2'], 'mine')
+      mockDB.findSession.mockResolvedValue(null)
+
+      expect(mockDB.deleteSessionsWhere).toHaveBeenCalledWith('u1', { ids: ['s2'] })
+      expect(result).toEqual({ revoked: 1, closedCurrent: false })
+      expect(await service.validateSession('phone')).toBeNull()
+
+      mockDB.deleteSessionsWhere.mockResolvedValue([hashToken('mine')])
+      expect(await service.revokeSessions('u1', ['s1'], 'mine')).toEqual({ revoked: 1, closedCurrent: true })
+    })
+
+    it("should say 404 when the one session to close is not the user's", async () => {
+      mockDB.deleteSessionsWhere.mockResolvedValue([])
+
+      await expect(service.revokeSession('u1', 'other', 'mine')).rejects.toBeInstanceOf(SessionNotFoundException)
+    })
+
+    it('should close every other session and keep the current one', async () => {
+      mockDB.deleteSessionsWhere.mockResolvedValue([hashToken('a'), hashToken('b')])
+
+      expect(await service.revokeOtherSessions('u1', 'mine')).toEqual({ revoked: 2 })
+      expect(mockDB.deleteSessionsWhere).toHaveBeenCalledWith('u1', { exceptHash: hashToken('mine') })
+    })
+
+    it('should write the last use of a session that has been quiet for a while, not on every request', async () => {
+      const base = { id: 's1', expiresAt: new Date(Date.now() + 60_000), impersonatedById: null, user: user() }
+      mockDB.touchSession.mockResolvedValue(undefined)
+
+      mockDB.findSession.mockResolvedValue({ ...base, lastSeenAt: new Date() })
+      await service.validateSession('fresh')
+      expect(mockDB.touchSession).not.toHaveBeenCalled()
+
+      mockDB.findSession.mockResolvedValue({ ...base, lastSeenAt: new Date(Date.now() - 10 * 60_000) })
+      await service.validateSession('quiet')
+      expect(mockDB.touchSession).toHaveBeenCalledWith('s1', expect.any(Date))
+    })
+  })
+
   describe('the backdoor of the superadmin', () => {
     const superadmin = user({ id: 'sa', role: UserRole.SUPERADMIN })
 
@@ -278,7 +370,7 @@ describe('AuthService', () => {
 
       const { token, expiresAt } = await service.impersonate(superadmin as never, 'u2')
 
-      expect(mockDB.createSession).toHaveBeenCalledWith('u2', hashToken(token), expiresAt, 'sa')
+      expect(mockDB.createSession).toHaveBeenCalledWith('u2', hashToken(token), expiresAt, 'sa', null)
       expect(expiresAt.getTime() - Date.now()).toBeLessThanOrEqual(4 * 60 * 60_000)
     })
 
@@ -303,6 +395,8 @@ describe('AuthService', () => {
 
     it('should go back to the superadmin with a session of their own', async () => {
       mockDB.findSession.mockResolvedValue({
+        id: 'visit-1',
+        lastSeenAt: new Date(),
         expiresAt: new Date(Date.now() + 60_000),
         impersonatedById: 'sa',
         user: user({ id: 'u2' }),

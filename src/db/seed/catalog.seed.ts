@@ -1,7 +1,8 @@
 import { PrismaClient } from '@/generated/prisma/client'
+import { PaymentMethodType } from '@/commons/constants/catalog.constant'
 import { JsonHelper } from '@/commons/helpers/json.helper'
 
-import { BUDGET_GROUPS, CATEGORIES, PAYMENT_METHODS, PEOPLE } from './catalog.seed.data'
+import { BASE_PAYMENT_METHODS, BUDGET_GROUPS, CATEGORIES, PAYMENT_METHODS, PEOPLE } from './catalog.seed.data'
 
 export interface CatalogSeedResult {
   people: number
@@ -10,11 +11,14 @@ export interface CatalogSeedResult {
   categories: number
 }
 
-// What every user starts with (D97): the budget groups and the categories. People and cards are their own
+// What every user starts with (D97): the budget groups, the categories and the base payment methods (credit cards
+// come inactive, to turn on). People are their own
 export async function seedBaseCatalogs(
   prisma: PrismaClient,
   userId: string,
 ): Promise<Pick<CatalogSeedResult, 'budgetGroups' | 'categories'>> {
+  await seedBasePaymentMethods(prisma, userId)
+
   const groupIdByName = new Map<string, string>()
   for (const { name, ...group } of BUDGET_GROUPS) {
     const saved = await prisma.budgetGroup.upsert({
@@ -35,6 +39,26 @@ export async function seedBaseCatalogs(
   }
 
   return { budgetGroups: BUDGET_GROUPS.length, categories: CATEGORIES.length }
+}
+
+// Created once by name: a card the user already has, edited or turned on, is never touched again
+export async function seedBasePaymentMethods(prisma: PrismaClient, userId: string): Promise<number> {
+  for (const { name, aliases, showInBot = true, isPrimary = false, ...method } of BASE_PAYMENT_METHODS) {
+    const exists = await prisma.paymentMethod.findFirst({ where: { userId, name } })
+    if (exists) continue
+    await prisma.paymentMethod.create({
+      data: {
+        userId,
+        name,
+        ...method,
+        aliases: JsonHelper.stringify(aliases),
+        isPrimary,
+        showInBot,
+        isActive: method.type !== PaymentMethodType.CREDIT_CARD,
+      },
+    })
+  }
+  return BASE_PAYMENT_METHODS.length
 }
 
 // Idempotent: upserts by unique name/code, so it can run again after editing catalog.seed.data.ts.
