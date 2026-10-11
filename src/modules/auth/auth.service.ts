@@ -18,6 +18,7 @@ import { GoogleAccountLinkException } from '@/commons/exceptions/auth/google-acc
 import { SessionRequiredException } from '@/commons/exceptions/auth/session-required.exception'
 import { UserNotFoundException } from '@/commons/exceptions/auth/user-not-found.exception'
 import { InvalidCredentialsException } from '@/commons/exceptions/auth/invalid-credentials.exception'
+import { PhoneTakenException } from '@/commons/exceptions/auth/phone-taken.exception'
 import { InviteInvalidException } from '@/commons/exceptions/auth/invite-invalid.exception'
 import { LinkCodeInvalidException } from '@/commons/exceptions/auth/link-code-invalid.exception'
 import { ResetLinkInvalidException } from '@/commons/exceptions/auth/reset-link-invalid.exception'
@@ -50,6 +51,8 @@ export interface SessionUser {
   role: UserRole
   status: UserStatus
   phone: string | null
+  nickname: string | null
+  documentMasked: string | null
   hasPassword: boolean
   googleLinked: boolean
   telegramLinked: boolean
@@ -64,6 +67,8 @@ export const toSessionUser = (user: AuthUser, impersonatedBy: AuthUser | null = 
   role: user.role as UserRole,
   status: user.status as UserStatus,
   phone: user.phone,
+  nickname: user.nickname,
+  documentMasked: user.documentNumber ? `•••••${user.documentNumber.slice(-3)}` : null,
   hasPassword: !!user.passwordHash,
   googleLinked: !!user.googleSub,
   telegramLinked: !!user.telegramChatId,
@@ -108,6 +113,28 @@ export class AuthService {
     }
     await this.authDBRepository.clearAttempts(key)
     return this.startSession(user)
+  }
+
+  // Perfil: the user's own data. The mobile is unique across accounts; the DNI also goes to their "Yo" (D94)
+  async updateProfile(
+    userId: string,
+    input: { name?: string; nickname?: string | null; phone?: string | null; documentNumber?: string | null },
+  ): Promise<AuthUser> {
+    const data: Partial<Pick<AuthUser, 'name' | 'nickname' | 'phone' | 'documentNumber'>> = {}
+    if (input.name !== undefined) data.name = input.name
+    if (input.nickname !== undefined) data.nickname = input.nickname || null
+    if (input.documentNumber !== undefined) data.documentNumber = input.documentNumber
+    if (input.phone !== undefined) {
+      const phone = input.phone ? normalizePhone(input.phone) : null
+      const owner = phone ? await this.authDBRepository.findUserByPhone(phone) : null
+      if (owner && owner.id !== userId) throw new PhoneTakenException()
+      data.phone = phone
+    }
+    const user = await this.authDBRepository.updateUser(userId, data)
+    if (input.documentNumber !== undefined) {
+      await this.userProvisioningService.syncOwnerDocument(userId, input.documentNumber)
+    }
+    return user
   }
 
   async changePassword(userId: string, current: string | undefined, next: string): Promise<void> {

@@ -11,3 +11,12 @@ export enum CardHolderRole {
   TITULAR = 'titular',
   ADDITIONAL = 'additional',
 }
+
+// The pages where a person can be picked (settings ▸ Personas). Day to day is always the user and Cobros y deudas lists
+// everyone, so neither is a module
+export enum PersonModule {
+  FIXED_COSTS = 'fixed_costs',
+  PLATFORMS = 'platforms',
+  CARDS = 'cards',
+  RECURRING = 'recurring',
+}

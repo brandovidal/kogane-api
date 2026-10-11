@@ -1,6 +1,7 @@
 import { z } from 'zod'
 
 import { MIN_PASSWORD_LENGTH, UserRole, UserStatus } from '@/commons/constants/auth.constant'
+import { normalizePhone } from '@/commons/helpers/phone.helper'
 import { dateTimeSchema } from '@/commons/helpers/api-response.helper'
 
 const email = z.string().trim().toLowerCase().pipe(z.email())
@@ -42,6 +43,29 @@ export const changePasswordSchema = z.object({
   next: password,
 })
 
+// The signed-in user edits their own profile (Perfil): nothing here changes the role, the email or the password
+export const updateProfileSchema = z
+  .object({
+    name: z.string().trim().min(1).max(80).optional(),
+    nickname: z.string().trim().max(40).nullable().optional().describe('How the app greets them; null clears it'),
+    phone: z
+      .string()
+      .trim()
+      .max(20)
+      .refine((value) => value === '' || normalizePhone(value) !== null, 'A Peruvian mobile: 9 digits')
+      .nullable()
+      .optional()
+      .describe('Mobile (9 digits in Peru); also signs in with the password; empty or null clears it'),
+    documentNumber: z
+      .string()
+      .trim()
+      .regex(/^\d{8}$/)
+      .nullable()
+      .optional()
+      .describe('DNI: goes to their Yo (D94), never back in the clear'),
+  })
+  .refine((value) => Object.values(value).some((field) => field !== undefined))
+
 export const createInviteSchema = z.object({
   email,
   role: z.enum([UserRole.ADMIN, UserRole.MEMBER]).default(UserRole.MEMBER),
@@ -62,6 +86,8 @@ export const sessionUserSchema = z.object({
   name: z.string(),
   email: z.string(),
   phone: z.string().nullable(),
+  nickname: z.string().nullable(),
+  documentMasked: z.string().nullable().describe('Only the last 3 digits (D94)'),
   role: z.enum(UserRole),
   status: z.enum(UserStatus),
   hasPassword: z.boolean(),
