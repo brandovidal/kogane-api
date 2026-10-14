@@ -108,7 +108,7 @@ Los avisos (vencimientos, cierre del día, resumen del domingo, recurrentes) cor
 4. En `kogane-api`, **Settings → Serverless**: debe quedar **apagado**. Encendido, Railway duerme el servicio a los 10 minutos sin tráfico y los avisos no salen.
 5. Costo: Redis cobra su RAM dentro de los 5 USD del plan Hobby (uno chico, centavos a 1–2 USD al mes).
 
-Verificación: `/v1/health` muestra `redis: OK` y el log dice `reminders scheduled`. Para probar sin esperar la hora: `make notify JOB=due-reminders ENV=prod` (no repite avisos ya enviados). En local, `make dev` levanta Redis en Docker (`make redis`) y `.env.dev` usa `REDIS_URL=redis://localhost:6379`.
+Verificación: `/v1/health` muestra `redis: OK` y el log dice `reminders scheduled`. Para probar sin esperar la hora: `make notify JOB=due-reminders ENV=prod` (no repite avisos ya enviados). En local, `make dev` levanta Redis con Docker Compose (`make redis`, `docker-compose.yaml`) y `.env.dev` usa `REDIS_URL=redis://localhost:6379`.
 
 ## 3. GitHub
 

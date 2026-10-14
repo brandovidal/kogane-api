@@ -2,7 +2,8 @@
 
 .PHONY: deps generate db-deploy db-reset migrate audit-triggers seed studio
 
-deps: env-file generate db-deploy seed ## After a pull: Prisma client, pending migrations, catalogs and bot command menu
+deps: env-file generate db-deploy seed ## After a pull: Prisma client, pending migrations, catalogs, bot command menu and (dev) local Redis
+	@if [ "$(ENV)" = "dev" ]; then ./scripts/redis.sh || echo "Redis not started: reminders are off"; fi
 	@if grep -Eq '^TELEGRAM_BOT_TOKEN=.+' $(ENV_FILE); then \
 	  $(DOTENV) tsx scripts/telegram-setup.ts --optional-webhook; \
 	else echo "TELEGRAM_BOT_TOKEN not set in $(ENV_FILE): bot menu skipped"; fi

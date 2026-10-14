@@ -17,7 +17,7 @@ Tasks live in the `Makefile` + `makefiles/*.mk`, one file per group (`make help`
 ```sh
 make deps [ENV=prod]     # after pulling: Prisma client + pending migrations + seed + bot command menu
 make dev                 # local Redis + API + bot tunnel (dev bot of .env.dev); make dev:only [ENV=prod] = only the API
-make redis / redis-stop  # local Redis of the reminders (Docker, localhost:6379)
+make redis / redis-stop  # local Redis of the reminders (docker-compose.yaml, localhost:6379)
 make notify JOB=due-reminders [ENV=prod]   # run a reminders job now on the running API
 make migrate NAME=x     # new migration on local dev.db + prisma generate (non-interactive shell: prisma migrate diff → migrate deploy)
 make import-notion [DIR=<csv folder>] [CONFIRM=yes] [RESET=yes] [ENV=prod]   # Notion → Kogane (P14): report first; DIR defaults to ../docs/migrations/notion/Seguimiento financiero
