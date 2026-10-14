@@ -24,7 +24,9 @@ make import-notion [DIR=<csv folder>] [CONFIRM=yes] [RESET=yes] [ENV=prod]   # N
 make import-commitments [DIR=<folder>] [CONFIRM=yes] [ENV=prod]   # Notion "Pago de Prestamos" and "Pago de Terreno" → loans and investments (P27); DIR defaults to ../docs/migrations/notion
 make import-notion-reset CONFIRM=yes [ENV=prod]   # deletes only what came from Notion (and imp_batches/imp_rows); steps in docs/import-notion.md
 make db-deploy / seed / studio [ENV=prod]
-make db-reset [CONFIRM=yes]   # dev only: empties every table (schema, migrations and R2 files stay), clears the ntf:* Redis lists and reseeds the catalogs; asks to type "dev"
+make db-reset [CONFIRM=yes]   # dev only: empties every table (schema, migrations and R2 files stay), clears the ntf:* Redis lists and reseeds the catalogs; asks to type "dev"; backs up first
+make db-backup                # SQLite copy to .data/backups/<env>-<date>.db (VACUUM INTO via prisma db execute)
+make db-restore FILE=<backup> [CONFIRM=yes]  # dev only, API stopped: backs up the current dev.db, loads the backup and applies pending migrations
 make telegram URL=https://…   # webhook + command menu
 make lint / format / build / test / test-integration
 make check              # lint + build + knip + unit + integration (what CI runs)

@@ -54,7 +54,7 @@ El `Makefile` define las variables comunes (`ENV`, archivo `.env.<ENV>`) e inclu
 | Archivo                | Tareas                                                         | Uso en el despliegue                                                                              |
 | ---------------------- | -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
 | `makefiles/app.mk`     | `dev`, `debug`, `clean`                                        | `pnpm dev` equivale a `make dev` (local)                                                          |
-| `makefiles/db.mk`      | `deps`, `generate`, `db-deploy`, `migrate`, `seed`, `studio`   | `make deps ENV=prod` / `make db-deploy ENV=prod` hacen a mano lo que el job `db`                  |
+| `makefiles/db.mk`      | `deps`, `generate`, `db-deploy`, `db-backup`, `db-restore`, `migrate`, `seed`, `studio` | `make deps ENV=prod` / `make db-deploy ENV=prod` hacen a mano lo que el job `db`                  |
 | `makefiles/bot.mk`     | `telegram`, `tunnel`, `secret`                                 | `make telegram ENV=prod` hace a mano lo que el job `telegram`; `make tunnel` para el bot en local |
 | `makefiles/quality.mk` | `lint`, `format`, `build`, `test`, `test-integration`, `check` | `make check` es lo mismo que el job `check`                                                       |
 | `makefiles/eval.mk`    | `eval-replay`, `eval-ai`                                       | no entra al despliegue; `eval-ai` gasta cuota y pide `CONFIRM=yes`                                |
