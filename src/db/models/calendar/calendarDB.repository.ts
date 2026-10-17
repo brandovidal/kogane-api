@@ -146,6 +146,26 @@ export class CalendarDBRepository {
     return count
   }
 
+  // The rows of one card statement (and currency) with the name of the card: what a payment from the web covers
+  async findCardStatement(paymentMethodId: string, { paymentMonth, paymentYear }: PaymentPeriod, currency?: string) {
+    const [card, rows] = await Promise.all([
+      this.prisma.paymentMethod.findUnique({ where: { id: paymentMethodId }, select: { name: true } }),
+      this.prisma.creditCardExpense.findMany({
+        where: { paymentMethodId, paymentMonth, paymentYear, ...(currency ? { currency } : {}) },
+        select: { amount: true, currency: true, paymentStatus: true },
+      }),
+    ])
+    return card ? { name: card.name, rows } : null
+  }
+
+  // A fixed cost or a subscription to pay from the web: its name, amount and whether it is still open
+  async findPayable(refType: 'fixed_cost' | 'subscription', id: string) {
+    const select = { description: true, amount: true, currency: true, paymentStatus: true } as const
+    return refType === 'fixed_cost'
+      ? this.prisma.fixedCost.findUnique({ where: { id }, select })
+      : this.prisma.subscription.findUnique({ where: { id }, select })
+  }
+
   // ✅ Pagado of a fixed cost or a subscription reminder: true when paid now, false when it was already paid, null
   // when it does not exist anymore
   async payFixedCost(id: string, paymentDate: Date): Promise<boolean | null> {

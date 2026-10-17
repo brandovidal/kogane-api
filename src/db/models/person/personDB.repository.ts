@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common'
 
 import { Prisma } from '@/generated/prisma/client'
 import { PrismaService } from '@/db/prisma/prisma.service'
+import { PersonModule } from '@/commons/constants/catalog.constant'
 import { JsonHelper } from '@/commons/helpers/json.helper'
 
 import { toCatalogError } from '../catalog-error.helper'
@@ -29,9 +30,10 @@ export class PersonDBRepository {
   }
 
   // kogane-app (P7): every person, active or not
-  async findAll(): Promise<PersonDbDto[]> {
-    const people = await this.prisma.person.findMany({ orderBy: { name: 'asc' } })
-    return this.serializer.toDtoArray(people)
+  // `module` keeps the people who can be picked on that page: the owner always can
+  async findAll(module?: PersonModule): Promise<PersonDbDto[]> {
+    const people = this.serializer.toDtoArray(await this.prisma.person.findMany({ orderBy: { name: 'asc' } }))
+    return module ? people.filter((person) => person.isDefault || person.appearsIn.includes(module)) : people
   }
 
   async create(data: PersonWriteDbDto): Promise<PersonDbDto> {
@@ -64,10 +66,13 @@ export class PersonDBRepository {
     return this.update(id, { isActive: false, isDefault: false })
   }
 
-  private toData({ aliases, ...rest }: Partial<PersonWriteDbDto>) {
+  private toData({ aliases, appearsIn, ...rest }: Partial<PersonWriteDbDto>) {
     return {
       ...rest,
       ...(aliases ? { aliases: JsonHelper.stringify(aliases.map((alias) => alias.toLowerCase())) } : {}),
+      ...(appearsIn ? { appearsIn: JsonHelper.stringify([...new Set(appearsIn)]) } : {}),
+      // The owner is in every page, whatever was sent
+      ...(rest.isDefault ? { appearsIn: JsonHelper.stringify(Object.values(PersonModule)) } : {}),
     }
   }
 }

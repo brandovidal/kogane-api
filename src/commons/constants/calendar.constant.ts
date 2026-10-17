@@ -26,4 +26,21 @@ export enum PaymentOutcome {
   ALREADY_PAID = 'already_paid',
   NOTHING_TO_PAY = 'nothing_to_pay', // a card statement without unpaid rows
   NOT_FOUND = 'not_found', // deleted after the reminder, or not something that can be paid
+  PARTIAL = 'partial', // a card statement paid in part: it stays open for what is left
+}
+
+// How a payment registered from the calendar was made (the "Medio de pago" of the dialog)
+export enum PayMethod {
+  TRANSFER = 'transfer',
+  CASH = 'cash',
+  WALLET = 'wallet',
+  DEBIT_CARD = 'debit_card',
+  OTHER = 'other',
+}
+
+// What a payment covers: everything left, the minimum of a card statement, or any other amount
+export enum PaymentKind {
+  TOTAL = 'total',
+  MINIMUM = 'minimum',
+  PARTIAL = 'partial',
 }

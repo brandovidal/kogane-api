@@ -21,4 +21,11 @@ export class UserProvisioningService {
       }
     })
   }
+
+  // The DNI of the account is the one of their "Yo": it opens their bank statements (D94)
+  syncOwnerDocument(userId: string, documentNumber: string | null): Promise<void> {
+    return runWithUser(userId, async () => {
+      await this.prisma.person.updateMany({ where: { isDefault: true }, data: { documentNumber } })
+    })
+  }
 }

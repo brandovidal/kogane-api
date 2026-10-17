@@ -1,8 +1,9 @@
 ##@ Database
 
-.PHONY: deps generate db-deploy db-reset migrate audit-triggers seed studio
+.PHONY: deps generate db-deploy db-reset db-backup db-restore migrate audit-triggers seed studio
 
-deps: env-file generate db-deploy seed ## After a pull: Prisma client, pending migrations, catalogs and bot command menu
+deps: env-file generate db-deploy seed ## After a pull: Prisma client, pending migrations, catalogs, bot command menu and (dev) local Redis
+	@if [ "$(ENV)" = "dev" ]; then ./scripts/redis.sh || echo "Redis not started: reminders are off"; fi
 	@if grep -Eq '^TELEGRAM_BOT_TOKEN=.+' $(ENV_FILE); then \
 	  $(DOTENV) tsx scripts/telegram-setup.ts --optional-webhook; \
 	else echo "TELEGRAM_BOT_TOKEN not set in $(ENV_FILE): bot menu skipped"; fi
@@ -26,8 +27,20 @@ db-reset: env-file ## Empty EVERY table of the dev database and reload the catal
 	  read answer; \
 	  if [ "$$answer" != "dev" ]; then echo "Cancelado: no se borró nada."; exit 1; fi; \
 	fi
+	@$(MAKE) --no-print-directory db-backup ENV=$(ENV)
 	$(DOTENV) tsx scripts/db-reset.ts $(ENV)
 	@$(MAKE) --no-print-directory seed ENV=$(ENV)
+
+db-backup: env-file ## Copy of the SQLite database to .data/backups (VACUUM INTO via Prisma, safe with the API running). SQLite only
+	@grep -Eq '^DATABASE_URL="?file:' $(ENV_FILE) || (echo "db-backup solo copia SQLite: $(ENV) usa Turso"; exit 1)
+	@mkdir -p .data/backups
+	@out=.data/backups/$(ENV)-$$(date +%Y%m%d-%H%M%S).db; \
+	  echo "VACUUM INTO '$$out';" | $(DOTENV) prisma db execute --stdin >/dev/null && echo "Backup: $$out"
+
+db-restore: env-file ## Load a backup into the dev database (FILE=.data/backups/dev-<date>.db): backs up the current one, then applies pending migrations. Only ENV=dev
+	@test "$(ENV)" = "dev" || (echo "db-restore solo corre en ENV=dev: la base de producción nunca se reemplaza"; exit 1)
+	@./scripts/db-restore.sh $(ENV_FILE) "$(FILE)"
+	$(DOTENV) prisma migrate deploy
 
 migrate: ## New migration on the local dev.db + client (NAME=add_something)
 	@test -n "$(NAME)" || (echo "Usage: make migrate NAME=<migration_name>"; exit 1)

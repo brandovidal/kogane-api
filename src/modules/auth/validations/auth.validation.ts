@@ -1,6 +1,7 @@
 import { z } from 'zod'
 
 import { MIN_PASSWORD_LENGTH, UserRole, UserStatus } from '@/commons/constants/auth.constant'
+import { normalizePhone } from '@/commons/helpers/phone.helper'
 import { dateTimeSchema } from '@/commons/helpers/api-response.helper'
 
 const email = z.string().trim().toLowerCase().pipe(z.email())
@@ -42,6 +43,29 @@ export const changePasswordSchema = z.object({
   next: password,
 })
 
+// The signed-in user edits their own profile (Perfil): nothing here changes the role, the email or the password
+export const updateProfileSchema = z
+  .object({
+    name: z.string().trim().min(1).max(80).optional(),
+    nickname: z.string().trim().max(40).nullable().optional().describe('How the app greets them; null clears it'),
+    phone: z
+      .string()
+      .trim()
+      .max(20)
+      .refine((value) => value === '' || normalizePhone(value) !== null, 'A Peruvian mobile: 9 digits')
+      .nullable()
+      .optional()
+      .describe('Mobile (9 digits in Peru); also signs in with the password; empty or null clears it'),
+    documentNumber: z
+      .string()
+      .trim()
+      .regex(/^\d{8}$/)
+      .nullable()
+      .optional()
+      .describe('DNI: goes to their Yo (D94), never back in the clear'),
+  })
+  .refine((value) => Object.values(value).some((field) => field !== undefined))
+
 export const createInviteSchema = z.object({
   email,
   role: z.enum([UserRole.ADMIN, UserRole.MEMBER]).default(UserRole.MEMBER),
@@ -62,6 +86,8 @@ export const sessionUserSchema = z.object({
   name: z.string(),
   email: z.string(),
   phone: z.string().nullable(),
+  nickname: z.string().nullable(),
+  documentMasked: z.string().nullable().describe('Only the last 3 digits (D94)'),
   role: z.enum(UserRole),
   status: z.enum(UserStatus),
   hasPassword: z.boolean(),
@@ -120,3 +146,29 @@ export const createdInviteSchema = inviteSchema.extend({
 })
 
 export const usersListSchema = z.object({ users: z.array(sessionUserSchema), invites: z.array(inviteSchema) })
+
+// ==================== Devices (Perfil ▸ Dispositivos) ====================
+
+export const revokeSessionsSchema = z.object({
+  ids: z.array(z.string().min(1)).min(1).max(50).describe('Ids of your own sessions (from GET /v1/auth/sessions)'),
+})
+
+export const deviceSessionSchema = z.object({
+  id: z.string(),
+  browser: z.string().describe('Chrome, Safari, Firefox…'),
+  os: z.string().describe('macOS, iOS, Windows, Android…'),
+  kind: z.enum(['desktop', 'mobile', 'tablet', 'unknown']),
+  ipAddress: z.string().nullable(),
+  createdAt: dateTimeSchema.describe('When it was opened'),
+  lastSeenAt: dateTimeSchema.describe('Last use (written every few minutes)'),
+  expiresAt: dateTimeSchema,
+  current: z.boolean().describe('The session of this very request'),
+  impersonated: z.boolean().describe('Opened by a superadmin entering as this user (the backdoor)'),
+})
+
+export const deviceSessionsSchema = z.object({ sessions: z.array(deviceSessionSchema) })
+
+export const revokedSessionsSchema = z.object({
+  revoked: z.number().int().describe('How many sessions were closed'),
+  closedCurrent: z.boolean().describe('True when the session of this request was among them: the cookie is cleared'),
+})

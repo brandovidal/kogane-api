@@ -19,11 +19,12 @@ const MODULE_ENTITIES = {
     'exp_subscriptions',
     'exp_credit_card_expenses',
     'exp_recurring_expenses',
+    'exp_payments',
   ],
   debts: ['exp_debts', 'exp_debt_payments'],
   commitments: ['exp_commitments', 'exp_contributions'],
   budget: ['bud_monthly_budgets', 'bud_budget_groups', 'bud_category_budgets', 'bud_incomes', 'bud_settings'],
-  settings: ['cat_people', 'cat_payment_methods', 'cat_card_holders', 'cat_categories', 'ntf_settings'],
+  settings: ['cat_people', 'cat_payment_methods', 'cat_accounts', 'cat_card_holders', 'cat_categories', 'ntf_settings'],
   imports: ['imp_batches', 'imp_statements'],
 } as const
 
@@ -36,6 +37,7 @@ const LABELS = {
   paymentMethodId: 'paymentMethod',
   budgetGroupId: 'budgetGroup',
   commitmentId: 'commitment',
+  accountId: 'account',
 } as const
 
 // Historial de cambios (P29): what the triggers wrote, read as a list or as the timeline of one record

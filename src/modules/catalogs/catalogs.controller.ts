@@ -1,9 +1,10 @@
-import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, Patch, Post, Put } from '@nestjs/common'
+import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, Patch, Post, Put, Query } from '@nestjs/common'
 import { ApiOkResponse, ApiOperation } from '@nestjs/swagger'
 
 import { ApiRest } from '@/commons/decorators/api-rest.decorator'
 import { PaymentMethodIncompleteException } from '@/commons/exceptions/catalog/payment-method-incomplete.exception'
 import { ResponseMessage } from '@/commons/decorators/response-message.decorator'
+import { AccountDBRepository } from '@/db/models/account/accountDB.repository'
 import { BudgetGroupDBRepository } from '@/db/models/budget-group/budgetGroupDB.repository'
 import { CategoryDBRepository } from '@/db/models/category/categoryDB.repository'
 import { CardHolderDBRepository } from '@/db/models/card-holder/cardHolderDB.repository'
@@ -11,6 +12,8 @@ import { PaymentMethodDBRepository } from '@/db/models/payment-method/paymentMet
 import { PersonDBRepository } from '@/db/models/person/personDB.repository'
 
 import {
+  AccountListResponseDto,
+  AccountResponseDto,
   BudgetGroupListResponseDto,
   BudgetGroupResponseDto,
   CategoryListResponseDto,
@@ -22,12 +25,15 @@ import {
   PersonResponseDto,
 } from './dto/response/catalogs-response.dto'
 import {
+  CreateAccountDto,
   CreateBudgetGroupDto,
   CreateCategoryDto,
   CardHoldersDto,
   StatementPasswordDto,
   CreatePaymentMethodDto,
   CreatePersonDto,
+  UpdateAccountDto,
+  PersonListQueryDto,
   UpdateBudgetGroupDto,
   UpdateCategoryDto,
   UpdatePaymentMethodDto,
@@ -55,8 +61,8 @@ export class PeopleController {
   @ApiOperation({ summary: 'People (active and inactive)' })
   @ApiOkResponse({ type: PersonListResponseDto })
   @ResponseMessage('PEOPLE_LISTED', 'People listed')
-  async findAll() {
-    return (await this.personDBRepository.findAll()).map(maskDocument)
+  async findAll(@Query() query: PersonListQueryDto) {
+    return (await this.personDBRepository.findAll(query.module)).map(maskDocument)
   }
 
   @Post()
@@ -152,6 +158,44 @@ export class PaymentMethodsController {
   @ResponseMessage('PAYMENT_METHOD_DEACTIVATED', 'Payment method deactivated')
   deactivate(@Param('id') id: string) {
     return this.paymentMethodDBRepository.deactivate(id)
+  }
+}
+
+// Cuentas de salida: where a payment leaves from (BCP, Yape, efectivo). Deactivated, never deleted
+@ApiRest('catalogs')
+@Controller('accounts')
+export class AccountsController {
+  constructor(private readonly accountDBRepository: AccountDBRepository) {}
+
+  @Get()
+  @ApiOperation({ summary: 'Accounts payments leave from, active ones first' })
+  @ApiOkResponse({ type: AccountListResponseDto })
+  @ResponseMessage('ACCOUNTS_LISTED', 'Accounts listed')
+  findAll() {
+    return this.accountDBRepository.findAll()
+  }
+
+  @Post()
+  @ApiOperation({ summary: 'Create an account; a bank account needs its bank' })
+  @ApiOkResponse({ type: AccountResponseDto })
+  @ResponseMessage('ACCOUNT_CREATED', 'Account created')
+  create(@Body() body: CreateAccountDto) {
+    return this.accountDBRepository.create(body)
+  }
+
+  @Patch(':id')
+  @ApiOkResponse({ type: AccountResponseDto })
+  @ResponseMessage('ACCOUNT_UPDATED', 'Account updated')
+  update(@Param('id') id: string, @Body() body: UpdateAccountDto) {
+    return this.accountDBRepository.update(id, body)
+  }
+
+  @Delete(':id')
+  @ApiOperation({ summary: 'Deactivate an account (payments keep pointing to it)' })
+  @ApiOkResponse({ type: AccountResponseDto })
+  @ResponseMessage('ACCOUNT_DEACTIVATED', 'Account deactivated')
+  deactivate(@Param('id') id: string) {
+    return this.accountDBRepository.deactivate(id)
   }
 }
 

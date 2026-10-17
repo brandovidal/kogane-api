@@ -27,6 +27,7 @@ model Person {
   isActive       Boolean  @default(true)
   isDefault      Boolean  @default(false) // the owner: used when a message does not say who the expense is for
   documentNumber String? // DNI: the password of the bank statement PDFs (D94); never sent to the AI nor logged
+  appearsIn      String   @default("[]") // JSON array of PersonModule: the pages where this person can be picked (the owner: all)
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
@@ -105,6 +106,51 @@ model CardHolder {
   @@unique([paymentMethodId, personId])
   @@index([userId])
   @@map("cat_card_holders")
+}
+
+// Cuentas de salida: where the money leaves from when something is paid (BCP, Yape, efectivo). A catalog, not a ledger:
+// it keeps no balance. Deactivated, never deleted: payments point to it
+model Account {
+  id        String   @id @default(cuid())
+  userId    String? // whose row it is (P23, D82): set and filtered by the tenancy extension
+  name      String
+  type      String // AccountType: bank_account · wallet · cash
+  bank      String? // bank accounts: the bank that holds it
+  currency  String   @default("PEN")
+  color     String?
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  payments Payment[]
+
+  @@unique([userId, name])
+  @@index([userId])
+  @@map("cat_accounts")
+}
+
+// What was registered when something was paid from the calendar or the dashboard: amount, day, how and from which
+// account. The paid status stays in its own table; this is the trace (a card statement paid in parts has several)
+model Payment {
+  id        String   @id @default(cuid())
+  userId    String? // whose row it is (P23, D82): set and filtered by the tenancy extension
+  refType   String // NotificationRefType: card_statement · fixed_cost · subscription · debt
+  refId     String
+  title     String // name of what was paid, kept so the history reads even if the record is deleted
+  amount    Float
+  currency  String   @default("PEN")
+  kind      String // PaymentKind: total · minimum · partial
+  paidAt    DateTime
+  method    String? // PayMethod: transfer · cash · wallet · debit_card · other
+  accountId String?
+  account   Account? @relation(fields: [accountId], references: [id], onDelete: SetNull)
+  note      String?
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([refType, refId])
+  @@index([accountId])
+  @@map("exp_payments")
 }
 
 model Category {
@@ -952,6 +998,7 @@ model AuthUser {
   googleSub      String?   @unique // the account of Google that signs in as this user
   phone          String?   @unique // digits only (9 in Peru): also signs in with the password; set by an admin, never by the user
   documentNumber String? // DNI: copied to their "Yo" (D94); never returned in the clear
+  nickname       String? // how the app greets them; the web's profile edits it
   passwordHash   String? // scrypt: salt.hash
   role           String    @default("member") // UserRole
   status         String    @default("active") // UserStatus
@@ -988,6 +1035,8 @@ model AuthSession {
   user             AuthUser @relation(fields: [userId], references: [id], onDelete: Cascade)
   tokenHash        String   @unique
   impersonatedById String? // the superadmin who entered as this user (the backdoor of D84): the history says so
+  userAgent        String? // what the browser said it was (Perfil ▸ Dispositivos); never used to decide anything
+  ipAddress        String?
   expiresAt        DateTime
   lastSeenAt       DateTime @default(now())
   createdAt        DateTime @default(now())

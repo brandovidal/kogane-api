@@ -15,9 +15,11 @@ import {
 } from '@/commons/constants/auth.constant'
 import { ForbiddenRoleException } from '@/commons/exceptions/auth/forbidden-role.exception'
 import { GoogleAccountLinkException } from '@/commons/exceptions/auth/google-account-link.exception'
+import { SessionNotFoundException } from '@/commons/exceptions/auth/session-not-found.exception'
 import { SessionRequiredException } from '@/commons/exceptions/auth/session-required.exception'
 import { UserNotFoundException } from '@/commons/exceptions/auth/user-not-found.exception'
 import { InvalidCredentialsException } from '@/commons/exceptions/auth/invalid-credentials.exception'
+import { PhoneTakenException } from '@/commons/exceptions/auth/phone-taken.exception'
 import { InviteInvalidException } from '@/commons/exceptions/auth/invite-invalid.exception'
 import { LinkCodeInvalidException } from '@/commons/exceptions/auth/link-code-invalid.exception'
 import { ResetLinkInvalidException } from '@/commons/exceptions/auth/reset-link-invalid.exception'
@@ -27,6 +29,7 @@ import { UserDisabledException } from '@/commons/exceptions/auth/user-disabled.e
 import { WeakPasswordException } from '@/commons/exceptions/auth/weak-password.exception'
 import { hashPassword, verifyPassword } from '@/commons/helpers/password.helper'
 import { normalizePhone } from '@/commons/helpers/phone.helper'
+import { describeDevice, SessionDevice } from '@/commons/helpers/device.helper'
 import { generateLinkCode, generateToken, hashToken } from '@/commons/helpers/token.helper'
 import { AuthDBRepository } from '@/db/models/auth/authDB.repository'
 import { AuthUser } from '@/generated/prisma/client'
@@ -36,11 +39,25 @@ import { GoogleProfile } from './google-oauth.service'
 import { UserProvisioningService } from './user-provisioning.service'
 
 const SESSION_CACHE_MS = 20_000
+const TOUCH_SESSION_MS = 5 * 60_000
 const DAY_MS = 24 * 60 * 60_000
 
 export interface ValidSession {
   user: AuthUser
   impersonatedBy: AuthUser | null
+}
+
+export interface DeviceSession {
+  id: string
+  browser: string
+  os: string
+  kind: 'desktop' | 'mobile' | 'tablet' | 'unknown'
+  ipAddress: string | null
+  createdAt: Date
+  lastSeenAt: Date
+  expiresAt: Date
+  current: boolean
+  impersonated: boolean
 }
 
 export interface SessionUser {
@@ -50,6 +67,8 @@ export interface SessionUser {
   role: UserRole
   status: UserStatus
   phone: string | null
+  nickname: string | null
+  documentMasked: string | null
   hasPassword: boolean
   googleLinked: boolean
   telegramLinked: boolean
@@ -64,6 +83,8 @@ export const toSessionUser = (user: AuthUser, impersonatedBy: AuthUser | null = 
   role: user.role as UserRole,
   status: user.status as UserStatus,
   phone: user.phone,
+  nickname: user.nickname,
+  documentMasked: user.documentNumber ? `•••••${user.documentNumber.slice(-3)}` : null,
   hasPassword: !!user.passwordHash,
   googleLinked: !!user.googleSub,
   telegramLinked: !!user.telegramChatId,
@@ -88,7 +109,11 @@ export class AuthService {
   // ==================== Password ====================
 
   // The email or the mobile that an admin registered, and the password
-  async login(identifier: string, password: string): Promise<{ user: AuthUser; token: string; expiresAt: Date }> {
+  async login(
+    identifier: string,
+    password: string,
+    device: SessionDevice | null = null,
+  ): Promise<{ user: AuthUser; token: string; expiresAt: Date }> {
     const key = identifier.includes('@')
       ? identifier.trim().toLowerCase()
       : (normalizePhone(identifier) ?? identifier.trim())
@@ -107,7 +132,29 @@ export class AuthService {
       throw new InvalidCredentialsException()
     }
     await this.authDBRepository.clearAttempts(key)
-    return this.startSession(user)
+    return this.startSession(user, device)
+  }
+
+  // Perfil: the user's own data. The mobile is unique across accounts; the DNI also goes to their "Yo" (D94)
+  async updateProfile(
+    userId: string,
+    input: { name?: string; nickname?: string | null; phone?: string | null; documentNumber?: string | null },
+  ): Promise<AuthUser> {
+    const data: Partial<Pick<AuthUser, 'name' | 'nickname' | 'phone' | 'documentNumber'>> = {}
+    if (input.name !== undefined) data.name = input.name
+    if (input.nickname !== undefined) data.nickname = input.nickname || null
+    if (input.documentNumber !== undefined) data.documentNumber = input.documentNumber
+    if (input.phone !== undefined) {
+      const phone = input.phone ? normalizePhone(input.phone) : null
+      const owner = phone ? await this.authDBRepository.findUserByPhone(phone) : null
+      if (owner && owner.id !== userId) throw new PhoneTakenException()
+      data.phone = phone
+    }
+    const user = await this.authDBRepository.updateUser(userId, data)
+    if (input.documentNumber !== undefined) {
+      await this.userProvisioningService.syncOwnerDocument(userId, input.documentNumber)
+    }
+    return user
   }
 
   async changePassword(userId: string, current: string | undefined, next: string): Promise<void> {
@@ -120,7 +167,7 @@ export class AuthService {
 
   // "¿Olvidaste tu contraseña?": the one-use link proves the email (like an invitation); every session of the account
   // is closed and the new one starts here
-  async resetPassword(input: { token: string; password: string }) {
+  async resetPassword(input: { token: string; password: string }, device: SessionDevice | null = null) {
     if (input.password.length < MIN_PASSWORD_LENGTH) throw new WeakPasswordException()
     const token = await this.authDBRepository.consumeToken(
       AuthTokenKind.PASSWORD_RESET,
@@ -136,7 +183,7 @@ export class AuthService {
       status: UserStatus.ACTIVE,
     })
     await this.authDBRepository.clearAttempts(updated.email)
-    return this.startSession(updated)
+    return this.startSession(updated, device)
   }
 
   // ==================== Invitations ====================
@@ -148,7 +195,7 @@ export class AuthService {
 
   // The invitation proves the email: they choose a password and are in. An email that already exists (the claimed
   // owner, a superadmin created by script) only gets its password
-  async acceptInvite(input: { token: string; name?: string; password: string }) {
+  async acceptInvite(input: { token: string; name?: string; password: string }, device: SessionDevice | null = null) {
     if (input.password.length < MIN_PASSWORD_LENGTH) throw new WeakPasswordException()
     const invite = await this.findUsableInvite(input.token)
     const passwordHash = await hashPassword(input.password)
@@ -163,13 +210,13 @@ export class AuthService {
           passwordHash,
         })
     await this.authDBRepository.markInviteUsed(invite.id, new Date())
-    return this.startSession(user)
+    return this.startSession(user, device)
   }
 
   // ==================== Google ====================
 
   // Signed in with a verified Google account: a known user (by Google id or by email), or an invitation for that email
-  async signInWithGoogle(profile: GoogleProfile, inviteToken: string | null) {
+  async signInWithGoogle(profile: GoogleProfile, inviteToken: string | null, device: SessionDevice | null = null) {
     let user =
       (await this.authDBRepository.findUserByGoogleSub(profile.sub)) ??
       (await this.authDBRepository.findUserByEmail(profile.email))
@@ -195,7 +242,7 @@ export class AuthService {
         status: user.status === UserStatus.DISABLED ? user.status : UserStatus.ACTIVE,
       })
     }
-    return this.startSession(user)
+    return this.startSession(user, device)
   }
 
   async linkGoogleAccount(userId: string, profile: GoogleProfile): Promise<void> {
@@ -211,11 +258,14 @@ export class AuthService {
 
   // ==================== Sessions ====================
 
-  private async startSession(user: AuthUser): Promise<{ user: AuthUser; token: string; expiresAt: Date }> {
+  private async startSession(
+    user: AuthUser,
+    device: SessionDevice | null = null,
+  ): Promise<{ user: AuthUser; token: string; expiresAt: Date }> {
     if (user.status === UserStatus.DISABLED) throw new UserDisabledException()
     const token = generateToken()
     const expiresAt = new Date(Date.now() + SESSION_DAYS * DAY_MS)
-    await this.authDBRepository.createSession(user.id, hashToken(token), expiresAt)
+    await this.authDBRepository.createSession(user.id, hashToken(token), expiresAt, null, device)
     const updated = await this.authDBRepository.updateUser(user.id, { lastLoginAt: new Date() })
     void this.authDBRepository.deleteExpiredSessions(new Date()).catch(() => undefined)
     return { user: updated, token, expiresAt }
@@ -243,6 +293,10 @@ export class AuthService {
     ) {
       return null
     }
+    // "Último uso" of Dispositivos: written at most every few minutes, never making the request wait
+    if (Date.now() - found.lastSeenAt.getTime() > TOUCH_SESSION_MS) {
+      void this.authDBRepository.touchSession(found.id, new Date()).catch(() => undefined)
+    }
     const session = { user: found.user, impersonatedBy }
     this.sessions.set(tokenHash, { session, checkedAt: Date.now() })
     return session
@@ -252,22 +306,29 @@ export class AuthService {
 
   // A superadmin enters as another user to see what they see or fix what they cannot: a short session that says who is
   // behind it (the history records the superadmin as the actor)
-  async impersonate(actor: AuthUser, targetId: string): Promise<{ token: string; expiresAt: Date; user: AuthUser }> {
+  async impersonate(
+    actor: AuthUser,
+    targetId: string,
+    device: SessionDevice | null = null,
+  ): Promise<{ token: string; expiresAt: Date; user: AuthUser }> {
     const target = await this.authDBRepository.findUserById(targetId)
     if (!target) throw new UserNotFoundException({ id: targetId })
     if (target.status !== UserStatus.ACTIVE || target.id === actor.id) throw new ForbiddenRoleException()
     const token = generateToken()
     const expiresAt = new Date(Date.now() + IMPERSONATION_HOURS * 60 * 60_000)
-    await this.authDBRepository.createSession(target.id, hashToken(token), expiresAt, actor.id)
+    await this.authDBRepository.createSession(target.id, hashToken(token), expiresAt, actor.id, device)
     return { token, expiresAt, user: target }
   }
 
   // Back to the superadmin: their own new session, and the visit is over
-  async stopImpersonation(token: string): Promise<{ user: AuthUser; token: string; expiresAt: Date }> {
+  async stopImpersonation(
+    token: string,
+    device: SessionDevice | null = null,
+  ): Promise<{ user: AuthUser; token: string; expiresAt: Date }> {
     const session = await this.validateSession(token)
     if (!session?.impersonatedBy) throw new SessionRequiredException()
     await this.logout(token)
-    return this.startSession(session.impersonatedBy)
+    return this.startSession(session.impersonatedBy, device)
   }
 
   async logout(token: string): Promise<void> {
@@ -279,6 +340,53 @@ export class AuthService {
   async revokeSessionsOf(userId: string): Promise<void> {
     for (const [hash, entry] of this.sessions) if (entry.session.user.id === userId) this.sessions.delete(hash)
     await this.authDBRepository.deleteSessionsOf(userId)
+  }
+
+  // ==================== Devices (Perfil ▸ Dispositivos) ====================
+
+  // The open sessions of the user, the one making the request marked. A visit of a superadmin shows as such
+  async listSessions(userId: string, currentToken: string | undefined): Promise<DeviceSession[]> {
+    const currentHash = currentToken ? hashToken(currentToken) : null
+    const sessions = await this.authDBRepository.listSessionsOf(userId, new Date())
+    return sessions.map((session) => ({
+      id: session.id,
+      ...describeDevice(session.userAgent),
+      ipAddress: session.ipAddress,
+      createdAt: session.createdAt,
+      lastSeenAt: session.lastSeenAt,
+      expiresAt: session.expiresAt,
+      current: session.tokenHash === currentHash,
+      impersonated: !!session.impersonatedById,
+    }))
+  }
+
+  // Several at once; ids that are not the user's are ignored. `closedCurrent` tells the controller to clear the cookie
+  async revokeSessions(
+    userId: string,
+    ids: string[],
+    currentToken: string | undefined,
+  ): Promise<{ revoked: number; closedCurrent: boolean }> {
+    return this.forget(await this.authDBRepository.deleteSessionsWhere(userId, { ids }), currentToken)
+  }
+
+  async revokeSession(userId: string, id: string, currentToken: string | undefined) {
+    const result = await this.revokeSessions(userId, [id], currentToken)
+    if (!result.revoked) throw new SessionNotFoundException({ id })
+    return result
+  }
+
+  // "Cerrar en los demás dispositivos": everything except the session of this request
+  async revokeOtherSessions(userId: string, currentToken: string | undefined): Promise<{ revoked: number }> {
+    const hashes = await this.authDBRepository.deleteSessionsWhere(userId, {
+      exceptHash: currentToken ? hashToken(currentToken) : undefined,
+    })
+    const { revoked } = this.forget(hashes, currentToken)
+    return { revoked }
+  }
+
+  private forget(hashes: string[], currentToken: string | undefined) {
+    for (const hash of hashes) this.sessions.delete(hash)
+    return { revoked: hashes.length, closedCurrent: !!currentToken && hashes.includes(hashToken(currentToken)) }
   }
 
   // ==================== Telegram (D85) ====================

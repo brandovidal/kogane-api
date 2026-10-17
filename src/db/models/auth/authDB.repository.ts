@@ -62,8 +62,40 @@ export class AuthDBRepository {
     tokenHash: string,
     expiresAt: Date,
     impersonatedById: string | null = null,
+    device: { userAgent: string | null; ipAddress: string | null } | null = null,
   ): Promise<AuthSession> {
-    return this.prisma.authSession.create({ data: { userId, tokenHash, expiresAt, impersonatedById } })
+    return this.prisma.authSession.create({
+      data: {
+        userId,
+        tokenHash,
+        expiresAt,
+        impersonatedById,
+        userAgent: device?.userAgent ?? null,
+        ipAddress: device?.ipAddress ?? null,
+      },
+    })
+  }
+
+  // The sessions that are still open, the most recently used first (Perfil ▸ Dispositivos)
+  listSessionsOf(userId: string, now: Date): Promise<AuthSession[]> {
+    return this.prisma.authSession.findMany({
+      where: { userId, expiresAt: { gt: now } },
+      orderBy: { lastSeenAt: 'desc' },
+    })
+  }
+
+  // Revokes sessions of this user only (ids of someone else's are ignored); returns the hashes that were deleted so the
+  // memory of the service can forget them. `ids` omitted = every session of the user; `exceptHash` keeps one
+  async deleteSessionsWhere(userId: string, options: { ids?: string[]; exceptHash?: string } = {}): Promise<string[]> {
+    const where = {
+      userId,
+      ...(options.ids ? { id: { in: options.ids } } : {}),
+      ...(options.exceptHash ? { tokenHash: { not: options.exceptHash } } : {}),
+    }
+    const found = await this.prisma.authSession.findMany({ where, select: { id: true, tokenHash: true } })
+    if (!found.length) return []
+    await this.prisma.authSession.deleteMany({ where: { id: { in: found.map((session) => session.id) } } })
+    return found.map((session) => session.tokenHash)
   }
 
   findSession(tokenHash: string): Promise<(AuthSession & { user: AuthUser }) | null> {

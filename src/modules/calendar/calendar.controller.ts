@@ -38,10 +38,13 @@ export class CalendarController {
 
   @Post('pay')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Mark a calendar event paid: card statement, fixed cost, subscription or debt installment' })
+  @ApiOperation({
+    summary:
+      'Pay a calendar event: card statement (total, minimum or in parts), fixed cost, subscription or debt installment, with day, medio, cuenta de salida and note',
+  })
   @ApiOkResponse({ type: PayEventResponseDto })
   @ResponseMessage('CALENDAR_EVENT_PAID', 'Payment registered')
-  async pay(@Body() { refType, refId }: PayEventDto) {
-    return { outcome: await this.calendarService.pay(refType, refId) }
+  payEvent(@Body() { refType, refId, ...details }: PayEventDto) {
+    return this.calendarService.payWithDetails(refType, refId, details)
   }
 }

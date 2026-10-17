@@ -9,11 +9,11 @@ else
 NOTIFY_BASE := http://localhost:$${PORT:-5560}
 endif
 
-redis: ## Local Redis for the reminders (Docker, localhost:6379); make dev starts it too
+redis: ## Local Redis for the reminders (docker compose, localhost:6379); make dev starts it too
 	./scripts/redis.sh
 
 redis-stop: ## Stop the local Redis (its data stays for the next make redis)
-	docker stop kogane-redis
+	docker compose stop redis
 
 notify: env-file ## Run a reminders job now on the running API: JOB=due-reminders|daily-close|weekly|recurring|upcoming-refresh|files-cleanup|collect-month|collect-late [ENV=prod]
 	@test -n "$(JOB)" || (echo "Usage: make notify JOB=due-reminders [ENV=prod]"; exit 1)

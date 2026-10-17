@@ -54,7 +54,7 @@ El `Makefile` define las variables comunes (`ENV`, archivo `.env.<ENV>`) e inclu
 | Archivo                | Tareas                                                         | Uso en el despliegue                                                                              |
 | ---------------------- | -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
 | `makefiles/app.mk`     | `dev`, `debug`, `clean`                                        | `pnpm dev` equivale a `make dev` (local)                                                          |
-| `makefiles/db.mk`      | `deps`, `generate`, `db-deploy`, `migrate`, `seed`, `studio`   | `make deps ENV=prod` / `make db-deploy ENV=prod` hacen a mano lo que el job `db`                  |
+| `makefiles/db.mk`      | `deps`, `generate`, `db-deploy`, `db-backup`, `db-restore`, `migrate`, `seed`, `studio` | `make deps ENV=prod` / `make db-deploy ENV=prod` hacen a mano lo que el job `db`                  |
 | `makefiles/bot.mk`     | `telegram`, `tunnel`, `secret`                                 | `make telegram ENV=prod` hace a mano lo que el job `telegram`; `make tunnel` para el bot en local |
 | `makefiles/quality.mk` | `lint`, `format`, `build`, `test`, `test-integration`, `check` | `make check` es lo mismo que el job `check`                                                       |
 | `makefiles/eval.mk`    | `eval-replay`, `eval-ai`                                       | no entra al despliegue; `eval-ai` gasta cuota y pide `CONFIRM=yes`                                |
@@ -108,7 +108,7 @@ Los avisos (vencimientos, cierre del día, resumen del domingo, recurrentes) cor
 4. En `kogane-api`, **Settings → Serverless**: debe quedar **apagado**. Encendido, Railway duerme el servicio a los 10 minutos sin tráfico y los avisos no salen.
 5. Costo: Redis cobra su RAM dentro de los 5 USD del plan Hobby (uno chico, centavos a 1–2 USD al mes).
 
-Verificación: `/v1/health` muestra `redis: OK` y el log dice `reminders scheduled`. Para probar sin esperar la hora: `make notify JOB=due-reminders ENV=prod` (no repite avisos ya enviados). En local, `make dev` levanta Redis en Docker (`make redis`) y `.env.dev` usa `REDIS_URL=redis://localhost:6379`.
+Verificación: `/v1/health` muestra `redis: OK` y el log dice `reminders scheduled`. Para probar sin esperar la hora: `make notify JOB=due-reminders ENV=prod` (no repite avisos ya enviados). En local, `make dev` levanta Redis con Docker Compose (`make redis`, `docker-compose.yaml`) y `.env.dev` usa `REDIS_URL=redis://localhost:6379`.
 
 ## 3. GitHub
 

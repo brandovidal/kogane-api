@@ -1,6 +1,6 @@
 import { z } from 'zod'
 
-import { CardHolderRole, PaymentMethodType } from '@/commons/constants/catalog.constant'
+import { AccountType, CardHolderRole, PaymentMethodType, PersonModule } from '@/commons/constants/catalog.constant'
 import { dateTimeSchema } from '@/commons/helpers/api-response.helper'
 
 const day = z.number().int().min(1).max(31)
@@ -17,6 +17,15 @@ export const personSchema = z.object({
     .regex(/^[0-9A-Za-z]{6,15}$/)
     .nullable()
     .optional(),
+  appearsIn: z
+    .array(z.enum(PersonModule))
+    .max(Object.values(PersonModule).length)
+    .optional()
+    .describe('Pages where the person can be picked; Cobros y deudas lists everyone and Día a día is always the user'),
+})
+
+export const personListQuerySchema = z.object({
+  module: z.enum(PersonModule).optional().describe('Only the people who can be picked on that page (the owner always)'),
 })
 
 export const paymentMethodSchema = z.object({
@@ -80,6 +89,7 @@ export const personResponseSchema = z.object({
   isActive: z.boolean(),
   isDefault: z.boolean(),
   documentNumber: z.string().nullable().describe('Masked: only the last 3 characters (D94)'),
+  appearsIn: z.array(z.enum(PersonModule)),
 })
 
 export const paymentMethodResponseSchema = z.object({
@@ -101,6 +111,34 @@ export const paymentMethodResponseSchema = z.object({
   comment: z.string().nullable(),
   color: z.string().nullable(),
   hasStatementPassword: z.boolean().describe('A statement PDF password is saved for this card (I12); never returned'),
+})
+
+export const accountSchema = z.object({
+  name: z.string().trim().min(1).max(40),
+  type: z.enum(AccountType),
+  bank: z.string().trim().min(1).max(40).nullable().optional(),
+  currency: z.enum(['PEN', 'USD']).optional(),
+  color: z.string().trim().max(20).nullable().optional(),
+  isActive: z.boolean().optional(),
+})
+
+// A bank account says which bank holds it
+export const createAccountSchema = accountSchema.refine(
+  (account) => account.type !== AccountType.BANK_ACCOUNT || !!account.bank,
+  {
+    message: 'A bank account needs its bank',
+    path: ['bank'],
+  },
+)
+
+export const accountResponseSchema = z.object({
+  ...record,
+  name: z.string(),
+  type: z.enum(AccountType),
+  bank: z.string().nullable(),
+  currency: z.enum(['PEN', 'USD']),
+  color: z.string().nullable(),
+  isActive: z.boolean(),
 })
 
 export const statementPasswordSchema = z.object({

@@ -1,3 +1,4 @@
+import { PersonModule } from '@/commons/constants/catalog.constant'
 import { createHash, randomUUID } from 'node:crypto'
 import { readdir, readFile } from 'node:fs/promises'
 import { basename, join } from 'node:path'
@@ -479,7 +480,11 @@ export class NotionImporter {
       }
     }
     const catalog = buildExtractionCatalog({
-      people: people.map((person) => ({ ...person, aliases: aliases(person.aliases) })) as PersonDbDto[],
+      people: people.map((person) => ({
+        ...person,
+        aliases: aliases(person.aliases),
+        appearsIn: aliases(person.appearsIn) as PersonModule[],
+      })) as PersonDbDto[],
       paymentMethods: paymentMethods.map(({ statementPassword, ...method }) => ({
         ...method,
         aliases: aliases(method.aliases),

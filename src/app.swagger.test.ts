@@ -5,6 +5,7 @@ import { cleanupOpenApiDoc } from 'nestjs-zod'
 
 import { VERSIONING_OPTIONS } from '@/commons/constants/versioning.constant'
 import {
+  AccountsController,
   BudgetGroupsController,
   CategoriesController,
   PaymentMethodsController,
@@ -33,6 +34,7 @@ describe('Swagger of the REST API for kogane-app', () => {
       controllers: [
         PeopleController,
         PaymentMethodsController,
+        AccountsController,
         CategoriesController,
         BudgetGroupsController,
         ExpensesController,
