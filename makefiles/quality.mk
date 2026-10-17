@@ -18,8 +18,8 @@ test: ## Unit tests in watch mode
 	$(DOTENV_TEST) -- vitest --project unit
 
 test-integration: ## Integration tests against a fresh SQLite (conversation flows replay recorded AI answers)
-	pnpm test:integration
+	pnpm test:e2e
 
 check: lint build knip ## Lint, build, knip, unit and integration tests (what CI runs)
 	pnpm test:ci
-	pnpm test:integration
+	pnpm test:e2e

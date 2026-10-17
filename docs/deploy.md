@@ -1,6 +1,6 @@
 # Despliegue y configuración de kogane-api
 
-kogane-api corre en **Railway**, usa **Turso** (`kogane-db`) como base y el bot de Telegram le manda los mensajes por webhook. Producción: **`https://kogane-api.up.railway.app`**. Railway está conectado al repo y despliega solo cada push a `main`. GitHub Actions (`.github/workflows/deploy.yml`) hace lo que Railway no hace:
+kogane-api corre en **Railway**, usa **Turso** (`kogane-db`) como base y el bot de Telegram le manda los mensajes por webhook. Producción: **`https://kogane-api.up.railway.app`**. Railway está conectado al repo y despliega solo cada push a `main`. GitHub Actions (`.github/workflows/main.yml`) hace lo que Railway no hace:
 
 ```
 check (lint, build, tests) → db (migraciones + seed en kogane-db) → telegram (webhook + menú)
@@ -61,7 +61,7 @@ El `Makefile` define las variables comunes (`ENV`, archivo `.env.<ENV>`) e inclu
 | `makefiles/docker.mk`  | `docker`                                                       | prueba local de la imagen de Railway                                                              |
 | `makefiles/notifications.mk` | `redis`, `redis-stop`, `notify`                          | Redis local de los avisos; `make notify JOB=… ENV=prod` corre un job en producción                |
 
-`package.json` solo tiene `pnpm dev` y lo que llaman Railway (`build`, `start:prod`), el CI (`test:ci`, `test:integration`) y husky (`lint`, `format`).
+`package.json` solo tiene `pnpm dev` y lo que llaman Railway (`build`, `start:prod`), el CI (`test:ci`, `test:e2e`) y husky (`lint`, `format`).
 
 ## 1. Turso
 

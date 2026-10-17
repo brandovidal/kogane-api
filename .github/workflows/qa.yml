@@ -1,0 +1,52 @@
+name: QA
+
+on:
+  push:
+    branches:
+      - qa
+  pull_request:
+    branches:
+      - qa
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-qa
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm build
+      # Unused files, exports and dependencies (P28, D121); what is kept on purpose is justified in knip.jsonc
+      - run: pnpm exec knip --no-progress
+      # Tests never call R2 (D58): files go to a local folder
+      - name: Create test env
+        run: cp .env.example .env.test && sed -i -e 's/^STORAGE_ENV=.*/STORAGE_ENV=test/' -e 's/^OCR_ENABLED=.*/OCR_ENABLED=false/' .env.test
+      - run: pnpm test:ci
+      # SQLite file recreated with every migration (test/integration.setup.ts); no secrets, no AI calls
+      - run: pnpm test:e2e
+
+  db:
+    needs: check
+    runs-on: ubuntu-latest
+    environment: qa
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      DATABASE_AUTH_TOKEN: ${{ secrets.DATABASE_AUTH_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - name: Apply pending migrations
+        run: pnpm exec tsx scripts/db-deploy.ts

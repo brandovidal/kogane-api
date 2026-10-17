@@ -170,8 +170,8 @@ modules/<feature>/
 
 ## Deployment (P10)
 
-- `Dockerfile` + `railway.json` (health `/v1/health`); `.github/workflows/deploy.yml` runs `unit-test.yml`, then migrations and seed (`scripts/db-deploy.ts`, `prisma/seed.ts`) and `scripts/telegram-setup.ts`; Railway deploys from GitHub itself, after CI ("Wait for CI"). `PUBLIC_URL`: prod `https://kogane-api.up.railway.app`, local via `make dev` / `make tunnel` (`scripts/tunnel.sh`, always `.env.dev`; restores the prod webhook on exit only when dev and prod share the bot token). Guide: `docs/deploy.md`.
-- The `image` job of `deploy.yml` runs `make docker` (`scripts/docker-smoke.sh`, also the local check): builds the image and requires `/v1/health` 200 and `/docs` 404 before migrating Turso. The Prisma generator pins `importFileExtension = ""`: during the Docker install there is no `tsconfig.json` yet and Prisma 7 would emit `./internal/class.ts` imports that crash on start. `.dockerignore` excludes `src/generated`.
+- `Dockerfile` + `railway.json` (health `/v1/health`); `.github/workflows/main.yml` runs the checks (lint, build, knip, unit and integration tests), then migrations and seed (`scripts/db-deploy.ts`, `prisma/seed.ts`) and `scripts/telegram-setup.ts`; Railway deploys from GitHub itself, after CI ("Wait for CI"). `PUBLIC_URL`: prod `https://kogane-api.up.railway.app`, local via `make dev` / `make tunnel` (`scripts/tunnel.sh`, always `.env.dev`; restores the prod webhook on exit only when dev and prod share the bot token). Guide: `docs/deploy.md`.
+- The `image` job of `main.yml` runs `make docker` (`scripts/docker-smoke.sh`, also the local check): builds the image and requires `/v1/health` 200 and `/docs` 404 before migrating Turso. The Prisma generator pins `importFileExtension = ""`: during the Docker install there is no `tsconfig.json` yet and Prisma 7 would emit `./internal/class.ts` imports that crash on start. `.dockerignore` excludes `src/generated`.
 - `NODE_ENV=production` turns Swagger off (`isDocsEnabled`) and logs to JSON. Migrations must be backward compatible: they run before the new code.
 
 ## Database (Turso)
@@ -181,7 +181,7 @@ Environments: `.env.dev` = SQLite `file:./dev.db`, `.env.prod` = Turso `kogane-d
 Prisma Migrate cannot run against remote Turso. Flow:
 
 1. `make migrate NAME=<name>` creates the migration against local `dev.db` and regenerates the client (Prisma 7 `migrate dev` no longer runs `generate`).
-2. In production the deploy workflow (`.github/workflows/deploy.yml`) does it; by hand, `make db-deploy ENV=prod` (or `make deps ENV=prod`) applies the pending `prisma/migrations/*/migration.sql` to Turso (`scripts/db-deploy.ts`, tracked in `_app_migrations`; safe to re-run). Each migration runs with libSQL `migrate()`, which turns foreign keys off outside the transaction (SQLite ignores `PRAGMA foreign_keys=OFF` inside one, so a table redefinition would fire `ON DELETE SET NULL`); the migration's own PRAGMA lines are skipped and `PRAGMA foreign_key_check` runs after it.
+2. In production the deploy workflow (`.github/workflows/main.yml`) does it; by hand, `make db-deploy ENV=prod` (or `make deps ENV=prod`) applies the pending `prisma/migrations/*/migration.sql` to Turso (`scripts/db-deploy.ts`, tracked in `_app_migrations`; safe to re-run). Each migration runs with libSQL `migrate()`, which turns foreign keys off outside the transaction (SQLite ignores `PRAGMA foreign_keys=OFF` inside one, so a table redefinition would fire `ON DELETE SET NULL`); the migration's own PRAGMA lines are skipped and `PRAGMA foreign_key_check` runs after it.
 3. `make seed ENV=prod` if catalogs changed (the deploy workflow also seeds).
 
 Remote Turso does not send SQLite extended codes: a unique violation arrives as `P2039`, not `P2002`. `isPrismaError` handles it; always go through that helper.

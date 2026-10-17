@@ -38,7 +38,7 @@ Env files are git-ignored; never commit tokens.
 | `make eval-replay` | Golden set with the recorded AI answers (no AI calls) |
 | `make eval-ai CONFIRM=yes [RECORD=1]` | Golden set against the **real AI** (~30 calls of the free daily quota) |
 
-Tasks are grouped in `makefiles/*.mk` (app, database, bot, quality, eval, docker). `package.json` keeps `pnpm dev` (local watch mode) and what Railway (`build`, `start:prod`), CI (`test:ci`, `test:integration`) and husky (`lint`, `format`) call.
+Tasks are grouped in `makefiles/*.mk` (app, database, bot, quality, eval, docker). `package.json` keeps `pnpm dev` (local watch mode) and what Railway (`build`, `start:prod`), CI (`test:ci`, `test:e2e`) and husky (`lint`, `format`) call.
 
 ## Deployment
 
