@@ -5,10 +5,11 @@ import { ADMIN_KEY_HEADER, API_KEY_HEADER } from '@/commons/constants/auth.const
 import { ResponseMessage } from '@/commons/decorators/response-message.decorator'
 import { AdminKeyGuard } from '@/commons/guards/admin-key.guard'
 import { ApiKeyGuard } from '@/commons/guards/api-key.guard'
+import { EmptyResponseDto } from '@/commons/helpers/api-response.helper'
 import { AuthDBRepository } from '@/db/models/auth/authDB.repository'
 
-import { toSessionUser } from './auth.service'
-import { CreateSuperadminDto } from './dto/request/auth.dto'
+import { AuthService, toSessionUser } from './auth.service'
+import { CreateSuperadminDto, SetSuperadminPasswordDto } from './dto/request/auth.dto'
 import { SuperadminCreatedResponseDto } from './dto/response/auth-response.dto'
 import { upsertSuperadmin } from './superadmin.helper'
 import { UserProvisioningService } from './user-provisioning.service'
@@ -22,6 +23,7 @@ import { UsersService } from './users.service'
 @UseGuards(ApiKeyGuard, AdminKeyGuard)
 export class AdminController {
   constructor(
+    private readonly authService: AuthService,
     private readonly authDBRepository: AuthDBRepository,
     private readonly userProvisioningService: UserProvisioningService,
     private readonly usersService: UsersService,
@@ -36,5 +38,15 @@ export class AdminController {
   async createSuperadmin(@Body() body: CreateSuperadminDto) {
     const { user, inviteToken } = await upsertSuperadmin(this.authDBRepository, this.userProvisioningService, body)
     return { user: toSessionUser(user), url: this.usersService.inviteUrl(inviteToken) }
+  }
+
+  @Post('superadmins/password')
+  @HttpCode(HttpStatus.OK)
+  @ApiHeader({ name: ADMIN_KEY_HEADER, required: true, description: 'ADMIN_BOOTSTRAP_KEY' })
+  @ApiOperation({ summary: 'Set the password of an existing superadmin (backdoor): closes its sessions' })
+  @ApiOkResponse({ type: EmptyResponseDto })
+  @ResponseMessage('SUPERADMIN_PASSWORD_SET', 'Superadmin password saved')
+  async setSuperadminPassword(@Body() body: SetSuperadminPasswordDto) {
+    await this.authService.setSuperadminPassword(body.email, body.password)
   }
 }

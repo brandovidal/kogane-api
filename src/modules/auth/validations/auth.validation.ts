@@ -113,6 +113,11 @@ export const createSuperadminSchema = z.object({
     .describe('DNI: goes to their Yo (D94), never back in the clear'),
 })
 
+export const setSuperadminPasswordSchema = z.object({
+  email: email.describe('The email of an existing superadmin'),
+  password,
+})
+
 export const superadminCreatedSchema = z.object({
   user: sessionUserSchema,
   url: z.string().describe('The link to define a password (7 days, one use); Google needs nothing'),

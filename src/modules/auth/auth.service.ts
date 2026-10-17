@@ -165,6 +165,20 @@ export class AuthService {
     await this.authDBRepository.updateUser(userId, { passwordHash: await hashPassword(next) })
   }
 
+  // The backdoor without a shell (D84): the x-admin-key sets the password of an existing superadmin directly, closes
+  // every session of the account and lifts the login lock. Only a superadmin: it is not a way to reach other accounts
+  async setSuperadminPassword(email: string, password: string): Promise<void> {
+    if (password.length < MIN_PASSWORD_LENGTH) throw new WeakPasswordException()
+    const user = await this.authDBRepository.findUserByEmail(email.trim().toLowerCase())
+    if (!user || user.role !== UserRole.SUPERADMIN) throw new UserNotFoundException()
+    await this.revokeSessionsOf(user.id)
+    await this.authDBRepository.updateUser(user.id, {
+      passwordHash: await hashPassword(password),
+      status: UserStatus.ACTIVE,
+    })
+    await this.authDBRepository.clearAttempts(user.email)
+  }
+
   // "¿Olvidaste tu contraseña?": the one-use link proves the email (like an invitation); every session of the account
   // is closed and the new one starts here
   async resetPassword(input: { token: string; password: string }, device: SessionDevice | null = null) {

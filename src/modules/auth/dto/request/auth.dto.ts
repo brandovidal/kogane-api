@@ -11,11 +11,13 @@ import {
   loginSchema,
   resetPasswordSchema,
   revokeSessionsSchema,
+  setSuperadminPasswordSchema,
   updateProfileSchema,
   updateUserSchema,
 } from '../../validations/auth.validation'
 
 export class CreateSuperadminDto extends createZodDto(createSuperadminSchema) {}
+export class SetSuperadminPasswordDto extends createZodDto(setSuperadminPasswordSchema) {}
 export class LoginDto extends createZodDto(loginSchema) {}
 export class AcceptInviteDto extends createZodDto(acceptInviteSchema) {}
 export class GoogleStartQueryDto extends createZodDto(googleStartQuerySchema) {}
